@@ -1,8 +1,14 @@
+"""Browser lifecycle management.
+
+Uses Dynaconf settings for configuration and delegates
+driver creation to BrowserFactory + BrowserStrategy.
+"""
+
 from __future__ import annotations
 
 from selenium.webdriver.remote.webdriver import WebDriver
 
-from pylenium.config.config import Config
+from pylenium.config.config import settings
 from pylenium.core.browser_factory import BrowserFactory
 from pylenium.core.browser_options import BrowserOptions
 from pylenium.core.page import Page
@@ -16,23 +22,30 @@ class Browser:
 
     @classmethod
     def launch(cls, browser_type: str | None = None, headless: bool | None = None) -> Browser:
-        """Launch a new browser instance based on config or provided arguments."""
-        config = Config()
-        b_type = browser_type if browser_type else config.browser_type
-        is_headless = headless if headless is not None else config.headless
+        """Launch a new browser instance based on config or provided arguments.
+
+        Args:
+            browser_type: Override the browser type from config.
+            headless: Override the headless setting from config.
+
+        Returns:
+            A new Browser instance.
+        """
+        b_type = browser_type or settings.get("browser.type", "chrome")
+        is_headless = headless if headless is not None else settings.get("browser.headless", False)
 
         options = BrowserOptions(b_type)
         if is_headless:
             options.headless(True)
 
-        window_size = config.window_size
+        window_size = settings.get("browser.window_size", "1920x1080")
         if window_size:
             w, h = map(int, window_size.split("x"))
             options.window_size(w, h)
 
         driver = BrowserFactory.create(b_type, options)
 
-        timeout = config.page_load_timeout
+        timeout = settings.get("browser.page_load_timeout", 30)
         if timeout:
             driver.set_page_load_timeout(timeout)
 

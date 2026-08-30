@@ -1,20 +1,26 @@
+"""Facade for Selenium WebDriver, providing a Playwright-like API."""
+
 from __future__ import annotations
 
 from selenium.webdriver.remote.webdriver import WebDriver
 
-from pylenium.config.config import Config
+from pylenium.config.config import settings
 
 
 class Page:
-    """Facade for Selenium WebDriver, providing a Playwright-like API."""
+    """Simplified Playwright-like interface wrapping Selenium WebDriver."""
 
     def __init__(self, driver: WebDriver):
         self._driver = driver
 
     def goto(self, url: str) -> None:
-        """Navigate to the given URL."""
+        """Navigate to the given URL.
+
+        If the URL does not start with 'http', it will be prepended
+        with the base_url from configuration.
+        """
         if not url.startswith("http"):
-            base_url = Config().base_url
+            base_url = settings.get("browser.base_url", "")
             if base_url:
                 url = base_url.rstrip("/") + "/" + url.lstrip("/")
         self._driver.get(url)
