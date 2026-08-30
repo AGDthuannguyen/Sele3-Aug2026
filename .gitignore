@@ -1,0 +1,19 @@
+# Python / Pytest
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Poetry / Virtualenv
+.venv/
+.env
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Reports (Allure)
+allure-results/
+allure-report/
