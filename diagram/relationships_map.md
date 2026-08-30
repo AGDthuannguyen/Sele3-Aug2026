@@ -25,7 +25,6 @@ classDiagram
 
         class Page {
             -WebDriver _driver
-            -Config _config
             +goto(url)
             +locator(selector) Locator
             +get_by_role(role, name) Locator
@@ -37,11 +36,11 @@ classDiagram
         }
 
         class Locator {
-            -Page _page
+            -WebDriver _driver
             -str _selector
             -Locator _parent
-            +click() Locator
-            +fill(text) Locator
+            +click()
+            +fill(text)
             +text() str
             +is_visible() bool
             +get_attribute(name) str
@@ -66,8 +65,8 @@ classDiagram
         class AutoWait {
             -float _timeout
             -float _polling
-            +for_visible(by, value) WebElement
-            +for_clickable(by, value) WebElement
+            -for_visible(by, value) WebElement
+            -for_clickable(by, value) WebElement
             +until(condition_fn, msg) Any
         }
 
@@ -143,11 +142,6 @@ classDiagram
             +from_csv(path)$ list~dict~
         }
 
-        class Logger {
-            +get_logger(name)$ Logger
-            +info(msg)
-            +error(msg)
-        }
     }
 
     Browser --> BrowserFactory : delegates
