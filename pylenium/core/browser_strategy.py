@@ -8,10 +8,10 @@ across BrowserFactory and BrowserOptions.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.common.options import ArgOptions
 from selenium.webdriver.edge.options import Options as EdgeOptions
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -21,15 +21,15 @@ class BrowserStrategy(ABC):
     """Abstract base class for browser-specific strategies."""
 
     @abstractmethod
-    def create_options(self) -> Any:
+    def create_options(self) -> ArgOptions | None:
         """Create and return a browser-specific options object."""
 
     @abstractmethod
-    def create_driver(self, options: Any) -> WebDriver:
+    def create_driver(self, options: ArgOptions | None) -> WebDriver:
         """Create and return a WebDriver instance with the given options."""
 
     @abstractmethod
-    def apply_headless(self, options: Any) -> None:
+    def apply_headless(self, options: ArgOptions | None) -> None:
         """Apply headless mode to the given options object."""
 
 
@@ -39,11 +39,12 @@ class ChromeStrategy(BrowserStrategy):
     def create_options(self) -> ChromeOptions:
         return ChromeOptions()
 
-    def create_driver(self, options: Any) -> WebDriver:
+    def create_driver(self, options: ArgOptions | None) -> WebDriver:
         return webdriver.Chrome(options=options)
 
-    def apply_headless(self, options: Any) -> None:
-        options.add_argument("--headless=new")
+    def apply_headless(self, options: ArgOptions | None) -> None:
+        if options:
+            options.add_argument("--headless=new")
 
 
 class FirefoxStrategy(BrowserStrategy):
@@ -52,11 +53,12 @@ class FirefoxStrategy(BrowserStrategy):
     def create_options(self) -> FirefoxOptions:
         return FirefoxOptions()
 
-    def create_driver(self, options: Any) -> WebDriver:
+    def create_driver(self, options: ArgOptions | None) -> WebDriver:
         return webdriver.Firefox(options=options)
 
-    def apply_headless(self, options: Any) -> None:
-        options.add_argument("-headless")
+    def apply_headless(self, options: ArgOptions | None) -> None:
+        if options:
+            options.add_argument("-headless")
 
 
 class EdgeStrategy(BrowserStrategy):
@@ -65,11 +67,12 @@ class EdgeStrategy(BrowserStrategy):
     def create_options(self) -> EdgeOptions:
         return EdgeOptions()
 
-    def create_driver(self, options: Any) -> WebDriver:
+    def create_driver(self, options: ArgOptions | None) -> WebDriver:
         return webdriver.Edge(options=options)
 
-    def apply_headless(self, options: Any) -> None:
-        options.add_argument("--headless=new")
+    def apply_headless(self, options: ArgOptions | None) -> None:
+        if options:
+            options.add_argument("--headless=new")
 
 
 class SafariStrategy(BrowserStrategy):
@@ -79,10 +82,10 @@ class SafariStrategy(BrowserStrategy):
         # Safari does not use standard options
         return None
 
-    def create_driver(self, options: Any) -> WebDriver:
+    def create_driver(self, options: ArgOptions | None) -> WebDriver:
         return webdriver.Safari()
 
-    def apply_headless(self, options: Any) -> None:
+    def apply_headless(self, options: ArgOptions | None) -> None:
         # Safari does not support headless mode
         pass
 

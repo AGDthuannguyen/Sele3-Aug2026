@@ -6,7 +6,7 @@ keeping this class clean and free of if-else branching.
 
 from __future__ import annotations
 
-from typing import Any
+from selenium.webdriver.common.options import ArgOptions
 
 from pylenium.core.browser_strategy import BrowserStrategy, get_strategy
 
@@ -16,7 +16,7 @@ class BrowserOptions:
 
     def __init__(self, browser_type: str):
         self._strategy: BrowserStrategy = get_strategy(browser_type)
-        self._options: Any = self._strategy.create_options()
+        self._options: ArgOptions | None = self._strategy.create_options()
         self._headless: bool = False
 
     def headless(self, enabled: bool = True) -> BrowserOptions:
@@ -36,7 +36,7 @@ class BrowserOptions:
             self._options.add_argument(arg)
         return self
 
-    def build(self) -> Any:
+    def build(self) -> ArgOptions | None:
         """Apply all deferred settings and return the configured options."""
         if self._headless:
             self._strategy.apply_headless(self._options)
