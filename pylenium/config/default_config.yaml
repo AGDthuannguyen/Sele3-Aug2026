@@ -1,0 +1,17 @@
+browser:
+  type: chrome
+  headless: false
+  window_size: "1920x1080"
+  page_load_timeout: 30
+
+waits:
+  timeout: 10
+  polling_interval: 0.5
+
+assertions:
+  timeout: 5
+  polling_interval: 0.25
+
+reporting:
+  screenshot_on_failure: true
+  reporter: allure
