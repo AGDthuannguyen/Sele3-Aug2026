@@ -5,6 +5,7 @@ from __future__ import annotations
 from selenium.webdriver.remote.webdriver import WebDriver
 
 from pylenium.config.config import settings
+from pylenium.core.locator import Locator
 
 
 class Page:
@@ -33,6 +34,60 @@ class Page:
         """Get the current URL."""
         return self._driver.current_url
 
+    # -- Locator creation methods --
+
+    def locator(self, selector: str) -> Locator:
+        """Create a Locator for the given CSS or XPath selector.
+
+        Selector type is auto-detected:
+        - Starts with '/' or '(' → XPath
+        - Everything else → CSS
+
+        Args:
+            selector: A CSS or XPath selector string.
+
+        Returns:
+            A lazy Locator instance.
+        """
+        return Locator(self._driver, selector)
+
+    def get_by_role(self, role: str, name: str | None = None) -> Locator:
+        """Create a Locator that finds elements by their ARIA role.
+
+        Uses a simplified XPath matching on the 'role' attribute
+        and optionally filters by accessible name (aria-label or text content).
+
+        Args:
+            role: The ARIA role to search for (e.g., 'button', 'link').
+            name: Optional accessible name to filter by.
+
+        Returns:
+            A lazy Locator instance.
+        """
+        if name:
+            xpath = (
+                f"//*[@role='{role}']"
+                f"[normalize-space(@aria-label)='{name}' or "
+                f"normalize-space(text())='{name}']"
+            )
+        else:
+            xpath = f"//*[@role='{role}']"
+        return Locator(self._driver, xpath)
+
+    def get_by_text(self, text: str) -> Locator:
+        """Create a Locator that finds elements containing the given text.
+
+        Args:
+            text: The text content to search for.
+
+        Returns:
+            A lazy Locator instance.
+        """
+        xpath = f"//*[normalize-space(text())='{text}']"
+        return Locator(self._driver, xpath)
+
+    # -- Page actions --
+
     def screenshot(self, path: str) -> bytes:
         """Take a screenshot and save it to the specified path.
 
@@ -45,5 +100,3 @@ class Page:
     def close(self) -> None:
         """Close the page and its underlying driver."""
         self._driver.close()
-
-    # Note: Locator methods (locator, get_by_role, etc.) will be added in Phase 3
