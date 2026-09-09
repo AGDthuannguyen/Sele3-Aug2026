@@ -11,6 +11,7 @@ from __future__ import annotations
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
+from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException
 
 from pylenium.waits.auto_wait import AutoWait
 
@@ -18,16 +19,10 @@ from pylenium.waits.auto_wait import AutoWait
 def _parse_selector(selector: str) -> tuple[str, str]:
     """Auto-detect selector type (CSS or XPath) based on the selector string.
 
-    Selectors starting with '/' or '//' are treated as XPath.
+    Selectors starting with '/', '(' or './' are treated as XPath.
     Everything else is treated as CSS.
-
-    Args:
-        selector: The selector string.
-
-    Returns:
-        A (By, value) tuple for Selenium.
     """
-    if selector.startswith("/") or selector.startswith("("):
+    if selector.startswith(('/', '(')) or selector.startswith('./') or selector.startswith('.//'):
         return By.XPATH, selector
     return By.CSS_SELECTOR, selector
 
@@ -42,27 +37,61 @@ class Locator:
         _index: Optional index for nth() element selection.
     """
 
-    def __init__(self, driver: WebDriver, selector: str,
+    def __init__(self, selector: str, driver: WebDriver | None = None,
                  parent: Locator | None = None,
                  index: int | None = None):
+        """Create a Locator.
+
+        The driver can be omitted for class‑level definitions. It will be
+        resolved lazily from the parent ``Locator`` (or a ``Page`` that
+        binds it later).
+        """
         self._driver = driver
         self._selector = selector
         self._parent = parent
         self._index = index
         self._by, self._value = _parse_selector(selector)
 
+    def _resolve_driver(self) -> WebDriver:
+        """Return the effective WebDriver, searching up the parent chain.
+
+        Raises:
+            ValueError: If no driver is available.
+        """
+        if self._driver is not None:
+            return self._driver
+        if self._parent is not None:
+            return self._parent._resolve_driver()
+        raise ValueError("WebDriver instance not provided to Locator")
+
     # -- Actions (auto-wait before executing) --
 
     def click(self) -> None:
-        """Wait for the element to be clickable, then click it."""
-        element = self._find_with_wait("clickable")
-        element.click()
+        """Wait for the element to be clickable, then click it.
+
+        Retries once if a ``StaleElementReferenceException`` occurs.
+        """
+        try:
+            element = self._find_with_wait("clickable")
+            element.click()
+        except StaleElementReferenceException:
+            # Re‑find and retry once
+            element = self._find_with_wait("clickable")
+            element.click()
 
     def fill(self, text: str) -> None:
-        """Wait for the element to be visible, clear it, then type text."""
-        element = self._find_with_wait("visible")
-        element.clear()
-        element.send_keys(text)
+        """Wait for the element to be visible, clear it, then type text.
+
+        Retries once on ``StaleElementReferenceException``.
+        """
+        try:
+            element = self._find_with_wait("visible")
+            element.clear()
+            element.send_keys(text)
+        except StaleElementReferenceException:
+            element = self._find_with_wait("visible")
+            element.clear()
+            element.send_keys(text)
 
     def text(self) -> str:
         """Wait for the element to be visible and return its text content."""
@@ -72,25 +101,23 @@ class Locator:
     def is_visible(self) -> bool:
         """Check if the element is currently visible without waiting.
 
-        Returns:
-            True if the element is displayed, False otherwise.
+        Returns ``True`` if displayed, ``False`` otherwise.
         """
         try:
             element = self._find_immediate()
             return element.is_displayed()
-        except Exception:
+        except (NoSuchElementException, StaleElementReferenceException):
             return False
 
     def is_enabled(self) -> bool:
         """Check if the element is currently enabled without waiting.
 
-        Returns:
-            True if the element is enabled, False otherwise.
+        Returns ``True`` if enabled, ``False`` otherwise.
         """
         try:
             element = self._find_immediate()
             return element.is_enabled()
-        except Exception:
+        except (NoSuchElementException, StaleElementReferenceException):
             return False
 
     def get_attribute(self, name: str) -> str | None:
@@ -116,7 +143,7 @@ class Locator:
         Returns:
             A new child-scoped Locator.
         """
-        return Locator(self._driver, selector, parent=self)
+        return Locator(selector, driver=self._driver, parent=self)
 
     # -- Collection methods --
 
@@ -128,7 +155,7 @@ class Locator:
         """
         elements = self._find_all()
         return [
-            Locator(self._driver, self._selector, parent=self._parent, index=i)
+            Locator(self._selector, driver=self._driver, parent=self._parent, index=i)
             for i in range(len(elements))
         ]
 
@@ -145,7 +172,7 @@ class Locator:
         Returns:
             A new Locator targeting the element at the specified index.
         """
-        return Locator(self._driver, self._selector, parent=self._parent, index=index)
+        return Locator(self._selector, driver=self._driver, parent=self._parent, index=index)
 
     def count(self) -> int:
         """Return the number of matching elements.
@@ -175,7 +202,7 @@ class Locator:
 
         if self._index is not None:
             # Indexed element: find all, then pick by index
-            auto_wait._for_present(self._by, self._value)
+            auto_wait._for_present((self._by, self._value))
             elements = self._find_all()
             if self._index >= len(elements):
                 raise IndexError(
@@ -192,7 +219,7 @@ class Locator:
         }
         
         wait_func = wait_methods.get(condition, auto_wait._for_present)
-        return wait_func(self._by, self._value)
+        return wait_func((self._by, self._value))
 
     def _wait_within_parent(self, parent_element: WebElement,
                             condition: str) -> WebElement:
@@ -238,7 +265,11 @@ class Locator:
         else:
             elements = self._driver.find_elements(self._by, self._value)
 
+        if not elements:
+            raise NoSuchElementException(f"Cannot find element: {self._selector}")
         if self._index is not None:
+            if self._index >= len(elements):
+                raise IndexError(f"Index {self._index} out of range for selector '{self._selector}'")
             return elements[self._index]
         return elements[0]
 

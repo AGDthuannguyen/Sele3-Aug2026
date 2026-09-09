@@ -49,7 +49,7 @@ class Page:
         Returns:
             A lazy Locator instance.
         """
-        return Locator(self._driver, selector)
+        return Locator(selector, driver=self._driver)
 
     def get_by_role(self, role: str, name: str | None = None) -> Locator:
         """Create a Locator that finds elements by their ARIA role.
@@ -72,7 +72,7 @@ class Page:
             )
         else:
             xpath = f"//*[@role='{role}']"
-        return Locator(self._driver, xpath)
+        return Locator(xpath, driver=self._driver)
 
     def get_by_text(self, text: str) -> Locator:
         """Create a Locator that finds elements containing the given text.
@@ -84,7 +84,7 @@ class Page:
             A lazy Locator instance.
         """
         xpath = f"//*[normalize-space(text())='{text}']"
-        return Locator(self._driver, xpath)
+        return Locator(xpath, driver=self._driver)
 
     # -- Page actions --
 

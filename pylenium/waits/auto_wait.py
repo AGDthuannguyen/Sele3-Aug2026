@@ -7,7 +7,7 @@ polling interval are read from Dynaconf settings.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
 
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -16,6 +16,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 from pylenium.config.config import settings
 from pylenium.waits.conditions import WaitCondition
+from pylenium.constants.timeouts import Timeout
+
+if TYPE_CHECKING:
+    from pylenium.core.locator import Locator
 
 
 class AutoWait:
@@ -24,43 +28,43 @@ class AutoWait:
     def __init__(self, driver: WebDriver, timeout: float | None = None,
                  polling: float | None = None):
         self._driver = driver
-        self._timeout = timeout or settings.get("waits.timeout", 10)
+        self._timeout = timeout or Timeout.DEFAULT.value
         self._polling = polling or settings.get("waits.polling_interval", 0.5)
 
-    def _for_visible(self, by: str, value: str) -> WebElement:
+    def _for_visible(self, locator: Locator | tuple) -> WebElement:
         """Wait until an element is visible and return it.
 
         Args:
-            by: The Selenium By strategy (e.g., By.CSS_SELECTOR).
-            value: The selector value.
-
-        Returns:
-            The visible WebElement.
+            locator: Either a ``Locator`` instance or a ``(by, value)`` tuple.
         """
+        if isinstance(locator, tuple):
+            by, value = locator
+        else:
+            by, value = locator._by, locator._value
         return self._wait_for(WaitCondition.VISIBLE, (by, value))
 
-    def _for_clickable(self, by: str, value: str) -> WebElement:
+    def _for_clickable(self, locator: Locator | tuple) -> WebElement:
         """Wait until an element is clickable and return it.
 
         Args:
-            by: The Selenium By strategy.
-            value: The selector value.
-
-        Returns:
-            The clickable WebElement.
+            locator: Either a ``Locator`` instance or a ``(by, value)`` tuple.
         """
+        if isinstance(locator, tuple):
+            by, value = locator
+        else:
+            by, value = locator._by, locator._value
         return self._wait_for(WaitCondition.CLICKABLE, (by, value))
 
-    def _for_present(self, by: str, value: str) -> WebElement:
+    def _for_present(self, locator: Locator | tuple) -> WebElement:
         """Wait until an element is present in the DOM and return it.
 
         Args:
-            by: The Selenium By strategy.
-            value: The selector value.
-
-        Returns:
-            The present WebElement.
+            locator: Either a ``Locator`` instance or a ``(by, value)`` tuple.
         """
+        if isinstance(locator, tuple):
+            by, value = locator
+        else:
+            by, value = locator._by, locator._value
         return self._wait_for(WaitCondition.PRESENT, (by, value))
 
     def until(self, condition_fn: Callable, msg: str = "") -> Any:

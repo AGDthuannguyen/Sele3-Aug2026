@@ -1,6 +1,30 @@
 """Smart assertions with auto-retry, inspired by Playwright's expect()."""
 
 from __future__ import annotations
+from pylenium.constants.timeouts import Timeout
+
+
+def _retry_until(driver, timeout: float, polling: float, condition_fn, msg: str, is_negated: bool):
+    """Shared retry helper using Selenium WebDriverWait.
+
+    Args:
+        driver: Selenium WebDriver instance.
+        timeout: Max seconds to wait.
+        polling: Polling interval.
+        condition_fn: Callable returning bool.
+        msg: Assertion message.
+        is_negated: Whether the assertion is negated.
+    """
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.common.exceptions import TimeoutException
+
+    wait = WebDriverWait(driver, timeout, polling)
+    try:
+        wait.until(lambda _: condition_fn() != is_negated)
+    except TimeoutException:
+        negated_msg = " NOT" if is_negated else ""
+        raise AssertionError(f"Assertion failed after {timeout}s:{negated_msg} {msg}")
+
 
 import time
 from typing import TYPE_CHECKING
@@ -22,97 +46,46 @@ class LocatorAssertions:
         self._polling = settings.get("assertions.polling_interval", 0.25)
         self._is_negated = is_negated
 
-    def not_(self) -> LocatorAssertions:
+    @property
+    def not_(self) -> "LocatorAssertions":
         """Return a negated copy of this assertion.
 
         Example:
-            expect(locator).not_().to_be_visible()
+            expect(locator).not_.to_be_visible()
         """
         return LocatorAssertions(
             self._locator, self._timeout, is_negated=not self._is_negated
         )
 
+    def _run(self, condition_fn, msg: str):
+        driver = getattr(self._locator, "_resolve_driver", lambda: None)()
+        if not driver:
+            raise ValueError("WebDriver not available for assertion retry")
+        _retry_until(driver, self._timeout, self._polling, condition_fn, msg, self._is_negated)
+
     def to_have_text(self, expected: str) -> None:
-        """Assert that the element's text content matches the expected string.
-
-        Args:
-            expected: The expected text content.
-        """
+        """Assert that the element's text content matches the expected string."""
         def condition():
-            actual = self._locator.text()
-            return expected in actual
-
-        self._retry_until(
-            condition,
-            f"Expected element to have text '{expected}'"
-        )
+            return expected in self._locator.text()
+        self._run(condition, f"Expected element to have text '{expected}'")
 
     def to_be_visible(self) -> None:
         """Assert that the element is visible on the page."""
         def condition():
             return self._locator.is_visible()
-
-        self._retry_until(condition, "Expected element to be visible")
+        self._run(condition, "Expected element to be visible")
 
     def to_be_enabled(self) -> None:
         """Assert that the element is enabled."""
         def condition():
             return self._locator.is_enabled()
-
-        self._retry_until(condition, "Expected element to be enabled")
+        self._run(condition, "Expected element to be enabled")
 
     def to_have_attribute(self, name: str, value: str) -> None:
-        """Assert that the element has the specified attribute with the expected value.
-
-        Args:
-            name: The attribute name.
-            value: The expected attribute value.
-        """
+        """Assert that the element has the specified attribute with the expected value."""
         def condition():
-            actual = self._locator.get_attribute(name)
-            return actual == value
-
-        self._retry_until(
-            condition,
-            f"Expected element to have attribute '{name}' = '{value}'"
-        )
-
-    def _retry_until(self, condition_fn, msg: str) -> None:
-        """Retry a condition function until it passes or timeout is reached.
-
-        The condition is retried at regular polling intervals. If negated,
-        the condition result is inverted.
-
-        Args:
-            condition_fn: A callable returning True/False.
-            msg: Description of the assertion for error messages.
-
-        Raises:
-            AssertionError: If the condition is not met within the timeout.
-        """
-        end_time = time.time() + self._timeout
-        last_error = None
-
-        while time.time() < end_time:
-            try:
-                result = condition_fn()
-                if self._is_negated:
-                    result = not result
-                if result:
-                    return
-            except Exception as e:
-                last_error = e
-                if self._is_negated:
-                    # For negated assertions, exceptions mean element not found
-                    # which is a passing condition for not_().to_be_visible() etc.
-                    return
-            time.sleep(self._polling)
-
-        negated_msg = " NOT" if self._is_negated else ""
-        error_detail = f" (last error: {last_error})" if last_error else ""
-        raise AssertionError(
-            f"Assertion failed after {self._timeout}s:{negated_msg} {msg}{error_detail}"
-        )
+            return self._locator.get_attribute(name) == value
+        self._run(condition, f"Expected element to have attribute '{name}' = '{value}'")
 
 
 class PageAssertions:
@@ -121,77 +94,34 @@ class PageAssertions:
     def __init__(self, page: Page, timeout: float | None = None,
                  is_negated: bool = False):
         self._page = page
-        self._timeout = timeout or settings.get("assertions.timeout", 5)
+        self._timeout = timeout or Timeout.ASSERTION.value
         self._polling = settings.get("assertions.polling_interval", 0.25)
         self._is_negated = is_negated
 
-    def not_(self) -> PageAssertions:
+    @property
+    def not_(self) -> "PageAssertions":
         """Return a negated copy of this assertion."""
         return PageAssertions(
             self._page, self._timeout, is_negated=not self._is_negated
         )
 
+    def _run(self, condition_fn, msg: str):
+        driver = getattr(self._page, "_driver", None) or getattr(self._page, "driver", None)
+        if not driver:
+            raise ValueError("WebDriver not available for assertion retry")
+        _retry_until(driver, self._timeout, self._polling, condition_fn, msg, self._is_negated)
+
     def to_have_url(self, expected: str) -> None:
-        """Assert that the page URL contains the expected string.
-
-        Args:
-            expected: The expected URL or substring.
-        """
+        """Assert that the page URL contains the expected string."""
         def condition():
-            actual = self._page.url()
-            return expected in actual
-
-        self._retry_until(
-            condition,
-            f"Expected page URL to contain '{expected}'"
-        )
+            return expected in self._page.url()
+        self._run(condition, f"Expected page URL to contain '{expected}'")
 
     def to_have_title(self, expected: str) -> None:
-        """Assert that the page title contains the expected string.
-
-        Args:
-            expected: The expected title or substring.
-        """
+        """Assert that the page title contains the expected string."""
         def condition():
-            actual = self._page.title()
-            return expected in actual
-
-        self._retry_until(
-            condition,
-            f"Expected page title to contain '{expected}'"
-        )
-
-    def _retry_until(self, condition_fn, msg: str) -> None:
-        """Retry a condition function until it passes or timeout is reached.
-
-        Args:
-            condition_fn: A callable returning True/False.
-            msg: Description of the assertion for error messages.
-
-        Raises:
-            AssertionError: If the condition is not met within the timeout.
-        """
-        end_time = time.time() + self._timeout
-        last_error = None
-
-        while time.time() < end_time:
-            try:
-                result = condition_fn()
-                if self._is_negated:
-                    result = not result
-                if result:
-                    return
-            except Exception as e:
-                last_error = e
-                if self._is_negated:
-                    return
-            time.sleep(self._polling)
-
-        negated_msg = " NOT" if self._is_negated else ""
-        error_detail = f" (last error: {last_error})" if last_error else ""
-        raise AssertionError(
-            f"Assertion failed after {self._timeout}s:{negated_msg} {msg}{error_detail}"
-        )
+            return expected in self._page.title()
+        self._run(condition, f"Expected page title to contain '{expected}'")
 
 
 def expect(target: Locator | Page) -> LocatorAssertions | PageAssertions:

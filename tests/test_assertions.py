@@ -34,7 +34,7 @@ def test_to_be_visible(page):
 
 def test_not_to_be_visible(page):
     hidden = page.locator("#hidden-element")
-    expect(hidden).not_().to_be_visible()
+    expect(hidden).not_.to_be_visible()
 
 
 def test_to_be_enabled(page):
@@ -64,4 +64,4 @@ def test_page_to_have_url(page):
 
 
 def test_page_not_to_have_title(page):
-    expect(page).not_().to_have_title("Wrong Title")
+    expect(page).not_.to_have_title("Wrong Title")
