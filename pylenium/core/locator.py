@@ -126,8 +126,7 @@ class Locator:
         Returns ``True`` if displayed, ``False`` otherwise.
         """
         try:
-            element = self._find_immediate()
-            return element.is_displayed()
+            return self._find_immediate().is_displayed()
         except (NoSuchElementException, StaleElementReferenceException):
             return False
 
@@ -137,8 +136,7 @@ class Locator:
         Returns ``True`` if enabled, ``False`` otherwise.
         """
         try:
-            element = self._find_immediate()
-            return element.is_enabled()
+            return self._find_immediate().is_enabled()
         except (NoSuchElementException, StaleElementReferenceException):
             return False
 
@@ -189,10 +187,9 @@ class Locator:
         Returns:
             A list of Locator instances, one per matching element.
         """
-        elements = self._find_all()
         return [
             Locator(self._selector, driver=self._driver, parent=self._parent, index=i)
-            for i in range(len(elements))
+            for i in range(self.count())
         ]
 
     def first(self) -> Locator:
@@ -229,33 +226,49 @@ class Locator:
         Returns:
             The found WebElement.
         """
-        auto_wait = AutoWait(self._driver)
+        from pylenium.constants.timeouts import Timeout
+        from pylenium.waits.conditions import WaitCondition
+
+        auto_wait = AutoWait(self._resolve_driver(), timeout=Timeout.DEFAULT.value)
 
         if self._parent is not None:
             # Child scope: find parent first, then search within it
             parent_element = self._parent._find_with_wait("present")
             return self._wait_within_parent(parent_element, condition)
 
-        if self._index is not None:
-            # Indexed element: find all, then pick by index
-            auto_wait._for_present((self._by, self._value))
-            elements = self._find_all()
-            if self._index >= len(elements):
-                raise IndexError(
-                    f"Index {self._index} out of range for "
-                    f"selector '{self._selector}' (found {len(elements)} elements)"
-                )
-            return elements[self._index]
-
-        # Normal: auto-wait on the selector directly
-        wait_methods = {
-            "visible": auto_wait._for_visible,
-            "clickable": auto_wait._for_clickable,
-            "present": auto_wait._for_present,
+        # Map string condition to WaitCondition enum
+        condition_map = {
+            "visible": WaitCondition.VISIBLE,
+            "clickable": WaitCondition.CLICKABLE,
+            "present": WaitCondition.PRESENT,
         }
-        
-        wait_func = wait_methods.get(condition, auto_wait._for_present)
-        return wait_func((self._by, self._value))
+        wait_condition = condition_map.get(condition, WaitCondition.PRESENT)
+
+        if self._index is not None:
+            # Indexed element: wait until enough elements exist, then pick by index
+            def _wait_for_index(driver):
+                elements = self._find_all()
+                if len(elements) <= self._index:
+                    return False
+                element = elements[self._index]
+                if wait_condition == WaitCondition.VISIBLE and not element.is_displayed():
+                    return False
+                if wait_condition == WaitCondition.CLICKABLE and (
+                    not element.is_displayed() or not element.is_enabled()
+                ):
+                    return False
+                return element
+
+            return auto_wait.until(
+                _wait_for_index,
+                msg=(
+                    f"Timed out waiting for element at index {self._index} "
+                    f"of selector '{self._selector}' to be {condition}"
+                ),
+            )
+
+        # Normal: auto-wait using WaitCondition
+        return auto_wait._wait_for(wait_condition, (self._by, self._value))
 
     def _wait_within_parent(self, parent_element: WebElement,
                             condition: str) -> WebElement:
@@ -268,7 +281,7 @@ class Locator:
         Returns:
             The found child WebElement.
         """
-        auto_wait = AutoWait(self._driver)
+        auto_wait = AutoWait(self._resolve_driver())
 
         def _find_child(driver):
             elements = parent_element.find_elements(self._by, self._value)
