@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, TYPE_CHECKING
 
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, StaleElementReferenceException, NoSuchElementException
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support.ui import WebDriverWait
@@ -30,6 +30,7 @@ class AutoWait:
         self._driver = driver
         self._timeout = timeout or Timeout.DEFAULT.value
         self._polling = polling or settings.get("waits.polling_interval", 0.5)
+        self._ignored = (StaleElementReferenceException, NoSuchElementException)
 
     def _for_visible(self, locator: Locator | tuple) -> WebElement:
         """Wait until an element is visible and return it.
@@ -81,7 +82,9 @@ class AutoWait:
         Raises:
             TimeoutException: If the condition is not met within the timeout.
         """
-        wait = WebDriverWait(self._driver, self._timeout, self._polling)
+        wait = WebDriverWait(
+            self._driver, self._timeout, self._polling, ignored_exceptions=self._ignored
+        )
         return wait.until(condition_fn, message=msg)
 
     def _wait_for(self, condition: WaitCondition, locator_tuple: tuple) -> Any:
@@ -97,7 +100,9 @@ class AutoWait:
         Raises:
             TimeoutException: If the condition is not met within the timeout.
         """
-        wait = WebDriverWait(self._driver, self._timeout, self._polling)
+        wait = WebDriverWait(
+            self._driver, self._timeout, self._polling, ignored_exceptions=self._ignored
+        )
         ec = condition.get_expected_condition(locator_tuple)
         return wait.until(ec, message=(
             f"Timed out after {self._timeout}s waiting for element "

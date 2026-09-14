@@ -16,9 +16,14 @@ def _retry_until(driver, timeout: float, polling: float, condition_fn, msg: str,
         is_negated: Whether the assertion is negated.
     """
     from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.common.exceptions import TimeoutException
+    from selenium.common.exceptions import TimeoutException, StaleElementReferenceException, NoSuchElementException
 
-    wait = WebDriverWait(driver, timeout, polling)
+    wait = WebDriverWait(
+        driver, 
+        timeout, 
+        polling, 
+        ignored_exceptions=(StaleElementReferenceException, NoSuchElementException)
+    )
     try:
         wait.until(lambda _: condition_fn() != is_negated)
     except TimeoutException:
@@ -26,7 +31,6 @@ def _retry_until(driver, timeout: float, polling: float, condition_fn, msg: str,
         raise AssertionError(f"Assertion failed after {timeout}s:{negated_msg} {msg}")
 
 
-import time
 from typing import TYPE_CHECKING
 
 from pylenium.config.config import settings
@@ -42,7 +46,7 @@ class LocatorAssertions:
     def __init__(self, locator: Locator, timeout: float | None = None,
                  is_negated: bool = False):
         self._locator = locator
-        self._timeout = timeout or settings.get("assertions.timeout", 5)
+        self._timeout = timeout or Timeout.ASSERTION.value
         self._polling = settings.get("assertions.polling_interval", 0.25)
         self._is_negated = is_negated
 

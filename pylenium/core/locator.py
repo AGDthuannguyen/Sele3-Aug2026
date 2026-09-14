@@ -16,13 +16,17 @@ from selenium.common.exceptions import NoSuchElementException, StaleElementRefer
 from pylenium.waits.auto_wait import AutoWait
 
 
-def _parse_selector(selector: str) -> tuple[str, str]:
+ByType = str
+"""Type alias for Selenium By strategy strings (e.g. ``By.CSS_SELECTOR``)."""
+
+
+def _parse_selector(selector: str) -> tuple[ByType, str]:
     """Auto-detect selector type (CSS or XPath) based on the selector string.
 
-    Selectors starting with '/', '(' or './' are treated as XPath.
+    Selectors starting with ``/``, ``(``, ``./`` or ``.//`` are treated as XPath.
     Everything else is treated as CSS.
     """
-    if selector.startswith(('/', '(')) or selector.startswith('./') or selector.startswith('.//'):
+    if selector.startswith(('/', '(', './', './/')):
         return By.XPATH, selector
     return By.CSS_SELECTOR, selector
 
@@ -69,34 +73,52 @@ class Locator:
     def click(self) -> None:
         """Wait for the element to be clickable, then click it.
 
-        Retries once if a ``StaleElementReferenceException`` occurs.
+        Uses ``AutoWait.until`` so that any
+        ``StaleElementReferenceException`` during the find-and-click
+        sequence is automatically retried until timeout.
         """
-        try:
-            element = self._find_with_wait("clickable")
+        auto_wait = AutoWait(self._resolve_driver())
+
+        def _click(driver):
+            element = self._find_fresh_element("clickable")
             element.click()
-        except StaleElementReferenceException:
-            # Re‑find and retry once
-            element = self._find_with_wait("clickable")
-            element.click()
+            return True
+
+        auto_wait.until(_click, msg=f"Failed to click element: {self._selector}")
 
     def fill(self, text: str) -> None:
         """Wait for the element to be visible, clear it, then type text.
 
-        Retries once on ``StaleElementReferenceException``.
+        Uses ``AutoWait.until`` so that any
+        ``StaleElementReferenceException`` during the sequence is
+        automatically retried until timeout.
         """
-        try:
-            element = self._find_with_wait("visible")
+        auto_wait = AutoWait(self._resolve_driver())
+
+        def _fill(driver):
+            element = self._find_fresh_element("visible")
             element.clear()
             element.send_keys(text)
-        except StaleElementReferenceException:
-            element = self._find_with_wait("visible")
-            element.clear()
-            element.send_keys(text)
+            return True
+
+        auto_wait.until(_fill, msg=f"Failed to fill element: {self._selector}")
 
     def text(self) -> str:
-        """Wait for the element to be visible and return its text content."""
-        element = self._find_with_wait("visible")
-        return element.text
+        """Wait for the element to be visible and return its text content.
+
+        Uses ``AutoWait.until`` so that any
+        ``StaleElementReferenceException`` is automatically retried.
+        """
+        auto_wait = AutoWait(self._resolve_driver())
+        result = {}
+
+        def _text(driver):
+            element = self._find_fresh_element("visible")
+            result["value"] = element.text
+            return True
+
+        auto_wait.until(_text, msg=f"Failed to get text from element: {self._selector}")
+        return result["value"]
 
     def is_visible(self) -> bool:
         """Check if the element is currently visible without waiting.
@@ -123,14 +145,28 @@ class Locator:
     def get_attribute(self, name: str) -> str | None:
         """Wait for the element to be present and return its attribute value.
 
+        Uses ``AutoWait.until`` so that any
+        ``StaleElementReferenceException`` is automatically retried.
+
         Args:
             name: The attribute name.
 
         Returns:
             The attribute value, or None if not found.
         """
-        element = self._find_with_wait("present")
-        return element.get_attribute(name)
+        auto_wait = AutoWait(self._resolve_driver())
+        result: dict[str, str | None] = {}
+
+        def _get_attr(driver):
+            element = self._find_fresh_element("present")
+            result["value"] = element.get_attribute(name)
+            return True
+
+        auto_wait.until(
+            _get_attr,
+            msg=f"Failed to get attribute '{name}' from element: {self._selector}"
+        )
+        return result["value"]
 
     # -- Child scope --
 
@@ -272,6 +308,38 @@ class Locator:
                 raise IndexError(f"Index {self._index} out of range for selector '{self._selector}'")
             return elements[self._index]
         return elements[0]
+
+    def _find_fresh_element(self, condition: str) -> WebElement:
+        """Find the element immediately and verify the given condition.
+
+        This is intended for use inside an ``AutoWait.until`` loop so
+        that ``StaleElementReferenceException`` raised here is caught by
+        the outer ``WebDriverWait`` and retried automatically.
+
+        Args:
+            condition: One of ``'visible'``, ``'clickable'``, ``'present'``.
+
+        Returns:
+            The matching ``WebElement``.
+
+        Raises:
+            NoSuchElementException: Propagated so ``WebDriverWait`` retries.
+            StaleElementReferenceException: Propagated so ``WebDriverWait`` retries.
+        """
+        element = self._find_immediate()
+
+        if condition == "visible":
+            if not element.is_displayed():
+                raise NoSuchElementException(
+                    f"Element found but not visible: {self._selector}"
+                )
+        elif condition == "clickable":
+            if not element.is_displayed() or not element.is_enabled():
+                raise NoSuchElementException(
+                    f"Element found but not clickable: {self._selector}"
+                )
+        # 'present' requires no extra check — just being in the DOM is enough.
+        return element
 
     def _find_all(self) -> list[WebElement]:
         """Find all matching elements immediately.
