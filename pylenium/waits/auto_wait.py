@@ -32,41 +32,25 @@ class AutoWait:
         self._polling = polling or settings.get("waits.polling_interval", 0.5)
         self._ignored = (StaleElementReferenceException, NoSuchElementException)
 
-    def _for_visible(self, locator: Locator | tuple) -> WebElement:
-        """Wait until an element is visible and return it.
+    @staticmethod
+    def _to_tuple(locator: Locator | tuple) -> tuple:
+        """Convert a Locator or tuple into a (by, value) tuple."""
+        if isinstance(locator, tuple):
+            return locator
+        return locator._by, locator._value
+
+    def for_condition(self, locator: Locator | tuple,
+                      condition: WaitCondition) -> WebElement:
+        """Wait until the element satisfies the given WaitCondition.
 
         Args:
-            locator: Either a ``Locator`` instance or a ``(by, value)`` tuple.
+            locator: A ``Locator`` instance or a ``(by, value)`` tuple.
+            condition: The ``WaitCondition`` to wait for.
+
+        Returns:
+            The matching WebElement.
         """
-        if isinstance(locator, tuple):
-            by, value = locator
-        else:
-            by, value = locator._by, locator._value
-        return self._wait_for(WaitCondition.VISIBLE, (by, value))
-
-    def _for_clickable(self, locator: Locator | tuple) -> WebElement:
-        """Wait until an element is clickable and return it.
-
-        Args:
-            locator: Either a ``Locator`` instance or a ``(by, value)`` tuple.
-        """
-        if isinstance(locator, tuple):
-            by, value = locator
-        else:
-            by, value = locator._by, locator._value
-        return self._wait_for(WaitCondition.CLICKABLE, (by, value))
-
-    def _for_present(self, locator: Locator | tuple) -> WebElement:
-        """Wait until an element is present in the DOM and return it.
-
-        Args:
-            locator: Either a ``Locator`` instance or a ``(by, value)`` tuple.
-        """
-        if isinstance(locator, tuple):
-            by, value = locator
-        else:
-            by, value = locator._by, locator._value
-        return self._wait_for(WaitCondition.PRESENT, (by, value))
+        return self._wait_for(condition, self._to_tuple(locator))
 
     def until(self, condition_fn: Callable, msg: str = "") -> Any:
         """Wait until a custom condition function returns a truthy value.

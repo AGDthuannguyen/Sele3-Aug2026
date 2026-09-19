@@ -13,7 +13,9 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException
 
+from pylenium.constants.timeouts import Timeout
 from pylenium.waits.auto_wait import AutoWait
+from pylenium.waits.conditions import WaitCondition
 
 
 ByType = str
@@ -29,6 +31,20 @@ def _parse_selector(selector: str) -> tuple[ByType, str]:
     if selector.startswith(('/', '(', './', './/')):
         return By.XPATH, selector
     return By.CSS_SELECTOR, selector
+
+
+def _check_condition(element: WebElement, condition: WaitCondition) -> bool:
+    """Return True if the element satisfies the given WaitCondition.
+
+    For ``PRESENT``, every element qualifies.
+    For ``VISIBLE``, the element must be displayed.
+    For ``CLICKABLE``, the element must be displayed **and** enabled.
+    """
+    if condition == WaitCondition.VISIBLE:
+        return element.is_displayed()
+    if condition == WaitCondition.CLICKABLE:
+        return element.is_displayed() and element.is_enabled()
+    return True  # PRESENT — just being in the DOM is enough
 
 
 class Locator:
@@ -80,8 +96,7 @@ class Locator:
         auto_wait = AutoWait(self._resolve_driver())
 
         def _click(driver):
-            element = self._find_fresh_element("clickable")
-            element.click()
+            self._find_fresh_element(WaitCondition.CLICKABLE).click()
             return True
 
         auto_wait.until(_click, msg=f"Failed to click element: {self._selector}")
@@ -96,7 +111,7 @@ class Locator:
         auto_wait = AutoWait(self._resolve_driver())
 
         def _fill(driver):
-            element = self._find_fresh_element("visible")
+            element = self._find_fresh_element(WaitCondition.VISIBLE)
             element.clear()
             element.send_keys(text)
             return True
@@ -110,11 +125,10 @@ class Locator:
         ``StaleElementReferenceException`` is automatically retried.
         """
         auto_wait = AutoWait(self._resolve_driver())
-        result = {}
+        result: dict[str, str] = {}
 
         def _text(driver):
-            element = self._find_fresh_element("visible")
-            result["value"] = element.text
+            result["value"] = self._find_fresh_element(WaitCondition.VISIBLE).text
             return True
 
         auto_wait.until(_text, msg=f"Failed to get text from element: {self._selector}")
@@ -156,8 +170,7 @@ class Locator:
         result: dict[str, str | None] = {}
 
         def _get_attr(driver):
-            element = self._find_fresh_element("present")
-            result["value"] = element.get_attribute(name)
+            result["value"] = self._find_fresh_element(WaitCondition.PRESENT).get_attribute(name)
             return True
 
         auto_wait.until(
@@ -217,66 +230,55 @@ class Locator:
 
     # -- Internal methods --
 
-    def _find_with_wait(self, condition: str) -> WebElement:
+    def _find_with_wait(self, condition: WaitCondition) -> WebElement:
         """Find the element with auto-wait.
 
         Args:
-            condition: One of 'visible', 'clickable', 'present'.
+            condition: The ``WaitCondition`` to wait for.
 
         Returns:
             The found WebElement.
         """
-        from pylenium.constants.timeouts import Timeout
-        from pylenium.waits.conditions import WaitCondition
-
         auto_wait = AutoWait(self._resolve_driver(), timeout=Timeout.DEFAULT.value)
 
         if self._parent is not None:
-            # Child scope: find parent first, then search within it
-            parent_element = self._parent._find_with_wait("present")
+            parent_element = self._parent._find_with_wait(WaitCondition.PRESENT)
             return self._wait_within_parent(parent_element, condition)
 
-        # Map string condition to WaitCondition enum
-        condition_map = {
-            "visible": WaitCondition.VISIBLE,
-            "clickable": WaitCondition.CLICKABLE,
-            "present": WaitCondition.PRESENT,
-        }
-        wait_condition = condition_map.get(condition, WaitCondition.PRESENT)
-
         if self._index is not None:
-            # Indexed element: wait until enough elements exist, then pick by index
-            def _wait_for_index(driver):
-                elements = self._find_all()
-                if len(elements) <= self._index:
-                    return False
-                element = elements[self._index]
-                if wait_condition == WaitCondition.VISIBLE and not element.is_displayed():
-                    return False
-                if wait_condition == WaitCondition.CLICKABLE and (
-                    not element.is_displayed() or not element.is_enabled()
-                ):
-                    return False
-                return element
+            return self._wait_for_indexed(auto_wait, condition)
 
-            return auto_wait.until(
-                _wait_for_index,
-                msg=(
-                    f"Timed out waiting for element at index {self._index} "
-                    f"of selector '{self._selector}' to be {condition}"
-                ),
-            )
+        return auto_wait.for_condition(self, condition)
 
-        # Normal: auto-wait using WaitCondition
-        return auto_wait._wait_for(wait_condition, (self._by, self._value))
+    def _wait_for_indexed(self, auto_wait: AutoWait,
+                          condition: WaitCondition) -> WebElement:
+        """Wait until enough elements exist, then pick by index.
+
+        Continuously polls until ``len(elements) > self._index`` and the
+        target element satisfies ``condition``. Raises ``TimeoutException``
+        if the condition is not met within the timeout.
+        """
+        def _poll(driver):
+            if self.count() <= self._index:
+                return False
+            element = self._find_all()[self._index]
+            return element if _check_condition(element, condition) else False
+
+        return auto_wait.until(
+            _poll,
+            msg=(
+                f"Timed out waiting for element at index {self._index} "
+                f"of selector '{self._selector}' to be {condition.value}"
+            ),
+        )
 
     def _wait_within_parent(self, parent_element: WebElement,
-                            condition: str) -> WebElement:
+                            condition: WaitCondition) -> WebElement:
         """Wait for an element within a parent element's scope.
 
         Args:
             parent_element: The parent WebElement to search within.
-            condition: The wait condition type.
+            condition: The WaitCondition to satisfy.
 
         Returns:
             The found child WebElement.
@@ -288,15 +290,11 @@ class Locator:
             if not elements:
                 return False
             element = elements[self._index] if self._index is not None else elements[0]
-            if condition == "visible" and not element.is_displayed():
-                return False
-            if condition == "clickable" and (not element.is_displayed() or not element.is_enabled()):
-                return False
-            return element
+            return element if _check_condition(element, condition) else False
 
         return auto_wait.until(
             _find_child,
-            msg=f"Child element '{self._selector}' not {condition} within parent"
+            msg=f"Child element '{self._selector}' not {condition.value} within parent"
         )
 
     def _find_immediate(self) -> WebElement:
@@ -308,11 +306,12 @@ class Locator:
         Raises:
             NoSuchElementException: If the element is not found.
         """
+        driver = self._resolve_driver()
         if self._parent is not None:
             parent_element = self._parent._find_immediate()
             elements = parent_element.find_elements(self._by, self._value)
         else:
-            elements = self._driver.find_elements(self._by, self._value)
+            elements = driver.find_elements(self._by, self._value)
 
         if not elements:
             raise NoSuchElementException(f"Cannot find element: {self._selector}")
@@ -322,7 +321,7 @@ class Locator:
             return elements[self._index]
         return elements[0]
 
-    def _find_fresh_element(self, condition: str) -> WebElement:
+    def _find_fresh_element(self, condition: WaitCondition) -> WebElement:
         """Find the element immediately and verify the given condition.
 
         This is intended for use inside an ``AutoWait.until`` loop so
@@ -330,7 +329,7 @@ class Locator:
         the outer ``WebDriverWait`` and retried automatically.
 
         Args:
-            condition: One of ``'visible'``, ``'clickable'``, ``'present'``.
+            condition: The ``WaitCondition`` the element must satisfy.
 
         Returns:
             The matching ``WebElement``.
@@ -340,18 +339,10 @@ class Locator:
             StaleElementReferenceException: Propagated so ``WebDriverWait`` retries.
         """
         element = self._find_immediate()
-
-        if condition == "visible":
-            if not element.is_displayed():
-                raise NoSuchElementException(
-                    f"Element found but not visible: {self._selector}"
-                )
-        elif condition == "clickable":
-            if not element.is_displayed() or not element.is_enabled():
-                raise NoSuchElementException(
-                    f"Element found but not clickable: {self._selector}"
-                )
-        # 'present' requires no extra check — just being in the DOM is enough.
+        if not _check_condition(element, condition):
+            raise NoSuchElementException(
+                f"Element found but not {condition.value}: {self._selector}"
+            )
         return element
 
     def _find_all(self) -> list[WebElement]:
@@ -360,18 +351,10 @@ class Locator:
         Returns:
             A list of matching WebElements.
         """
-        return self._find_all_raw()
-
-    def _find_all_raw(self) -> list[WebElement]:
-        """Raw find_elements call, respecting parent scope.
-
-        Returns:
-            A list of matching WebElements.
-        """
         if self._parent is not None:
             parent_element = self._parent._find_immediate()
             return parent_element.find_elements(self._by, self._value)
-        return self._driver.find_elements(self._by, self._value)
+        return self._resolve_driver().find_elements(self._by, self._value)
 
     def __repr__(self) -> str:
         parent_info = f", parent={self._parent!r}" if self._parent else ""
