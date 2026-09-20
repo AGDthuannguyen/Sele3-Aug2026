@@ -68,9 +68,20 @@ class LocatorAssertions:
         _retry_until(driver, self._timeout, self._polling, condition_fn, msg, self._is_negated)
 
     def to_have_text(self, expected: str) -> None:
-        """Assert that the element's text content matches the expected string."""
+        """Assert that the element's text content matches the expected string.
+
+        Uses ``_find_immediate()`` to avoid nested AutoWait — calling
+        ``locator.text()`` would block for up to ``Timeout.DEFAULT`` inside
+        its own wait, swallowing the assertion timeout.
+        """
+        from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException
+
         def condition():
-            return expected in self._locator.text()
+            try:
+                return expected in self._locator._find_immediate().text
+            except (NoSuchElementException, StaleElementReferenceException):
+                return False
+
         self._run(condition, f"Expected element to have text '{expected}'")
 
     def to_be_visible(self) -> None:
@@ -86,9 +97,20 @@ class LocatorAssertions:
         self._run(condition, "Expected element to be enabled")
 
     def to_have_attribute(self, name: str, value: str) -> None:
-        """Assert that the element has the specified attribute with the expected value."""
+        """Assert that the element has the specified attribute with the expected value.
+
+        Uses ``_find_immediate()`` to avoid nested AutoWait — calling
+        ``locator.get_attribute()`` would block for up to ``Timeout.DEFAULT``
+        inside its own wait, swallowing the assertion timeout.
+        """
+        from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException
+
         def condition():
-            return self._locator.get_attribute(name) == value
+            try:
+                return self._locator._find_immediate().get_attribute(name) == value
+            except (NoSuchElementException, StaleElementReferenceException):
+                return False
+
         self._run(condition, f"Expected element to have attribute '{name}' = '{value}'")
 
 

@@ -9,7 +9,13 @@ from __future__ import annotations
 
 from typing import Any, Callable, TYPE_CHECKING
 
-from selenium.common.exceptions import TimeoutException, StaleElementReferenceException, NoSuchElementException
+from selenium.common.exceptions import (
+    TimeoutException,
+    StaleElementReferenceException,
+    NoSuchElementException,
+    ElementClickInterceptedException,
+    ElementNotInteractableException,
+)
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support.ui import WebDriverWait
@@ -30,7 +36,12 @@ class AutoWait:
         self._driver = driver
         self._timeout = timeout or Timeout.DEFAULT.value
         self._polling = polling or settings.get("waits.polling_interval", 0.5)
-        self._ignored = (StaleElementReferenceException, NoSuchElementException)
+        self._ignored = (
+            StaleElementReferenceException,
+            NoSuchElementException,
+            ElementClickInterceptedException,
+            ElementNotInteractableException,
+        )
 
     @staticmethod
     def _to_tuple(locator: Locator | tuple) -> tuple:

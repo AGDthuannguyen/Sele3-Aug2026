@@ -102,16 +102,20 @@ class Locator:
         auto_wait.until(_click, msg=f"Failed to click element: {self._selector}")
 
     def fill(self, text: str) -> None:
-        """Wait for the element to be visible, clear it, then type text.
+        """Wait for the element to be visible **and** enabled, clear it, then type text.
 
-        Uses ``AutoWait.until`` so that any
-        ``StaleElementReferenceException`` during the sequence is
+        Uses ``WaitCondition.CLICKABLE`` (visible + enabled) because
+        ``send_keys`` requires the input to be editable — a disabled or
+        read-only input is visible but will raise
+        ``ElementNotInteractableException``.
+
+        Uses ``AutoWait.until`` so that transient exceptions are
         automatically retried until timeout.
         """
         auto_wait = AutoWait(self._resolve_driver())
 
         def _fill(driver):
-            element = self._find_fresh_element(WaitCondition.VISIBLE)
+            element = self._find_fresh_element(WaitCondition.CLICKABLE)
             element.clear()
             element.send_keys(text)
             return True
@@ -137,21 +141,31 @@ class Locator:
     def is_visible(self) -> bool:
         """Check if the element is currently visible without waiting.
 
-        Returns ``True`` if displayed, ``False`` otherwise.
+        Returns ``True`` if displayed, ``False`` if found but not displayed.
+
+        Raises:
+            NoSuchElementException: If the element is not in the DOM — this
+                ensures ``not_.to_be_visible()`` retries instead of passing
+                instantly for elements that haven't loaded yet.
         """
         try:
             return self._find_immediate().is_displayed()
-        except (NoSuchElementException, StaleElementReferenceException):
+        except StaleElementReferenceException:
             return False
 
     def is_enabled(self) -> bool:
         """Check if the element is currently enabled without waiting.
 
-        Returns ``True`` if enabled, ``False`` otherwise.
+        Returns ``True`` if enabled, ``False`` if found but disabled.
+
+        Raises:
+            NoSuchElementException: If the element is not in the DOM — this
+                ensures ``not_.to_be_enabled()`` retries instead of passing
+                instantly for elements that haven't loaded yet.
         """
         try:
             return self._find_immediate().is_enabled()
-        except (NoSuchElementException, StaleElementReferenceException):
+        except StaleElementReferenceException:
             return False
 
     def get_attribute(self, name: str) -> str | None:
