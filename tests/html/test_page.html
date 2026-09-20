@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Pylenium Test Page</title>
+</head>
+<body>
+    <h1 id="heading">Hello Pylenium</h1>
+
+    <div id="container">
+        <p class="item">Item 1</p>
+        <p class="item">Item 2</p>
+        <p class="item">Item 3</p>
+    </div>
+
+    <button role="button" aria-label="Submit">Submit</button>
+    <a href="#" role="link">Click me</a>
+
+    <input id="username" type="text" placeholder="Enter username" />
+
+    <div id="hidden-element" style="display: none;">Hidden content</div>
+
+    <div id="delayed-element-container"></div>
+
+    <script>
+        // Simulate a delayed element appearing after 1 second
+        setTimeout(function() {
+            var container = document.getElementById('delayed-element-container');
+            var el = document.createElement('p');
+            el.id = 'delayed-element';
+            el.textContent = 'I appeared after 1 second';
+            container.appendChild(el);
+        }, 1000);
+    </script>
+</body>
+</html>
