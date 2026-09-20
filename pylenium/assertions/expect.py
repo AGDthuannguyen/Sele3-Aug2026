@@ -1,39 +1,16 @@
-"""Smart assertions with auto-retry, inspired by Playwright's expect()."""
+"""Smart assertions with auto-retry, inspired by Playwright's expect().
+
+Uses :class:`~pylenium.waits.auto_wait.AutoWait` for retry/polling so that
+timeout, polling interval, and ignored-exception lists are defined in one
+place instead of being duplicated here.
+"""
 
 from __future__ import annotations
-from pylenium.constants.timeouts import Timeout
-
-
-def _retry_until(driver, timeout: float, polling: float, condition_fn, msg: str, is_negated: bool):
-    """Shared retry helper using Selenium WebDriverWait.
-
-    Args:
-        driver: Selenium WebDriver instance.
-        timeout: Max seconds to wait.
-        polling: Polling interval.
-        condition_fn: Callable returning bool.
-        msg: Assertion message.
-        is_negated: Whether the assertion is negated.
-    """
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.common.exceptions import TimeoutException, StaleElementReferenceException, NoSuchElementException
-
-    wait = WebDriverWait(
-        driver, 
-        timeout, 
-        polling, 
-        ignored_exceptions=(StaleElementReferenceException, NoSuchElementException)
-    )
-    try:
-        wait.until(lambda _: condition_fn() != is_negated)
-    except TimeoutException:
-        negated_msg = " NOT" if is_negated else ""
-        raise AssertionError(f"Assertion failed after {timeout}s:{negated_msg} {msg}")
-
 
 from typing import TYPE_CHECKING
 
 from pylenium.config.config import settings
+from pylenium.constants.timeouts import Timeout
 
 if TYPE_CHECKING:
     from pylenium.core.locator import Locator
@@ -61,57 +38,105 @@ class LocatorAssertions:
             self._locator, self._timeout, is_negated=not self._is_negated
         )
 
-    def _run(self, condition_fn, msg: str):
-        driver = getattr(self._locator, "_resolve_driver", lambda: None)()
-        if not driver:
-            raise ValueError("WebDriver not available for assertion retry")
-        _retry_until(driver, self._timeout, self._polling, condition_fn, msg, self._is_negated)
+    # -- private helpers -------------------------------------------------- #
+
+    def _run(self, condition_fn, msg: str) -> None:
+        """Retry *condition_fn* until it agrees with the negation flag.
+
+        Delegates to :class:`AutoWait` so that timeout, polling, and the
+        ignored-exception list are defined in a single place.
+        """
+        from pylenium.waits.auto_wait import AutoWait
+        from selenium.common.exceptions import TimeoutException
+
+        driver = self._locator._resolve_driver()
+        auto_wait = AutoWait(driver, timeout=self._timeout, polling=self._polling)
+
+        try:
+            auto_wait.until(
+                lambda _: condition_fn() != self._is_negated,
+                msg=msg,
+            )
+        except TimeoutException:
+            negated_msg = " NOT" if self._is_negated else ""
+            raise AssertionError(
+                f"Assertion failed after {self._timeout}s:{negated_msg} {msg}"
+            )
+
+    def _evaluate(self, eval_fn) -> bool:
+        """Safely query the immediate DOM state via *eval_fn*.
+
+        Calls ``eval_fn(element)`` on the result of
+        :meth:`Locator._find_immediate`.  If the element is missing or stale,
+        returns ``False`` so the outer ``_run`` loop can retry.
+
+        **Not used** for ``to_be_visible`` / ``to_be_enabled`` — those
+        delegate to ``Locator.is_visible()`` / ``is_enabled()`` which
+        intentionally let ``NoSuchElementException`` propagate so that
+        negated assertions (``not_.to_be_enabled()``) retry correctly.
+        """
+        from selenium.common.exceptions import (
+            NoSuchElementException,
+            StaleElementReferenceException,
+        )
+
+        try:
+            element = self._locator._find_immediate()
+            return eval_fn(element)
+        except (NoSuchElementException, StaleElementReferenceException):
+            return False
+
+    # -- public assertion methods ----------------------------------------- #
 
     def to_have_text(self, expected: str) -> None:
-        """Assert that the element's text content matches the expected string.
+        """Assert that the element's text content contains *expected*.
 
-        Uses ``_find_immediate()`` to avoid nested AutoWait — calling
-        ``locator.text()`` would block for up to ``Timeout.DEFAULT`` inside
-        its own wait, swallowing the assertion timeout.
+        Uses ``_find_immediate()`` via ``_evaluate`` to avoid nested
+        AutoWait — calling ``locator.text()`` would block for up to
+        ``Timeout.DEFAULT`` inside its own wait, swallowing the assertion
+        timeout.
         """
-        from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException
-
-        def condition():
-            try:
-                return expected in self._locator._find_immediate().text
-            except (NoSuchElementException, StaleElementReferenceException):
-                return False
-
-        self._run(condition, f"Expected element to have text '{expected}'")
+        self._run(
+            lambda: self._evaluate(lambda el: expected in el.text),
+            f"Expected element to have text '{expected}'",
+        )
 
     def to_be_visible(self) -> None:
-        """Assert that the element is visible on the page."""
-        def condition():
-            return self._locator.is_visible()
-        self._run(condition, "Expected element to be visible")
+        """Assert that the element is visible on the page.
+
+        Delegates to ``Locator.is_visible()`` which lets
+        ``NoSuchElementException`` propagate — ensuring
+        ``not_.to_be_visible()`` retries for missing elements.
+        """
+        self._run(
+            lambda: self._locator.is_visible(),
+            "Expected element to be visible",
+        )
 
     def to_be_enabled(self) -> None:
-        """Assert that the element is enabled."""
-        def condition():
-            return self._locator.is_enabled()
-        self._run(condition, "Expected element to be enabled")
+        """Assert that the element is enabled.
+
+        Delegates to ``Locator.is_enabled()`` which lets
+        ``NoSuchElementException`` propagate — ensuring
+        ``not_.to_be_enabled()`` retries for missing elements.
+        """
+        self._run(
+            lambda: self._locator.is_enabled(),
+            "Expected element to be enabled",
+        )
 
     def to_have_attribute(self, name: str, value: str) -> None:
-        """Assert that the element has the specified attribute with the expected value.
+        """Assert that the element has attribute *name* equal to *value*.
 
-        Uses ``_find_immediate()`` to avoid nested AutoWait — calling
-        ``locator.get_attribute()`` would block for up to ``Timeout.DEFAULT``
-        inside its own wait, swallowing the assertion timeout.
+        Uses ``_find_immediate()`` via ``_evaluate`` to avoid nested
+        AutoWait — calling ``locator.get_attribute()`` would block for up
+        to ``Timeout.DEFAULT`` inside its own wait, swallowing the assertion
+        timeout.
         """
-        from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException
-
-        def condition():
-            try:
-                return self._locator._find_immediate().get_attribute(name) == value
-            except (NoSuchElementException, StaleElementReferenceException):
-                return False
-
-        self._run(condition, f"Expected element to have attribute '{name}' = '{value}'")
+        self._run(
+            lambda: self._evaluate(lambda el: el.get_attribute(name) == value),
+            f"Expected element to have attribute '{name}' = '{value}'",
+        )
 
 
 class PageAssertions:
@@ -131,23 +156,41 @@ class PageAssertions:
             self._page, self._timeout, is_negated=not self._is_negated
         )
 
-    def _run(self, condition_fn, msg: str):
+    def _run(self, condition_fn, msg: str) -> None:
+        """Retry *condition_fn* using :class:`AutoWait`."""
+        from pylenium.waits.auto_wait import AutoWait
+        from selenium.common.exceptions import TimeoutException
+
         driver = getattr(self._page, "_driver", None) or getattr(self._page, "driver", None)
         if not driver:
             raise ValueError("WebDriver not available for assertion retry")
-        _retry_until(driver, self._timeout, self._polling, condition_fn, msg, self._is_negated)
+
+        auto_wait = AutoWait(driver, timeout=self._timeout, polling=self._polling)
+
+        try:
+            auto_wait.until(
+                lambda _: condition_fn() != self._is_negated,
+                msg=msg,
+            )
+        except TimeoutException:
+            negated_msg = " NOT" if self._is_negated else ""
+            raise AssertionError(
+                f"Assertion failed after {self._timeout}s:{negated_msg} {msg}"
+            )
 
     def to_have_url(self, expected: str) -> None:
         """Assert that the page URL contains the expected string."""
-        def condition():
-            return expected in self._page.url()
-        self._run(condition, f"Expected page URL to contain '{expected}'")
+        self._run(
+            lambda: expected in self._page.url(),
+            f"Expected page URL to contain '{expected}'",
+        )
 
     def to_have_title(self, expected: str) -> None:
         """Assert that the page title contains the expected string."""
-        def condition():
-            return expected in self._page.title()
-        self._run(condition, f"Expected page title to contain '{expected}'")
+        self._run(
+            lambda: expected in self._page.title(),
+            f"Expected page title to contain '{expected}'",
+        )
 
 
 def expect(target: Locator | Page) -> LocatorAssertions | PageAssertions:
