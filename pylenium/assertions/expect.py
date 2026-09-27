@@ -1,221 +1,198 @@
-"""Smart assertions with auto-retry, inspired by Playwright's expect().
+"""Retry assertions without treating missing or stale reads as boolean results.
 
-Uses :class:`~pylenium.waits.auto_wait.AutoWait` for retry/polling so that
-timeout, polling interval, and ignored-exception lists are defined in one
-place instead of being duplicated here.
+Visibility allows absence only in its negative form. Enabled/text/attribute
+assertions require an existing, readable element in both forms. Stale reads
+always retry. String assertions retain substring matching.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from copy import copy
+from typing import overload
+
+from selenium.common.exceptions import (
+    NoSuchElementException,
+    StaleElementReferenceException,
+    TimeoutException,
+)
+from selenium.webdriver.remote.webdriver import WebDriver
 
 from pylenium.config.config import settings
-from pylenium.constants.timeouts import Timeout
+from pylenium.core.locator import Locator
+from pylenium.core.page import Page
+from pylenium.waits.auto_wait import AutoWait
 
-if TYPE_CHECKING:
-    from pylenium.core.locator import Locator
-    from pylenium.core.page import Page
+
+def _assertion_wait(driver: WebDriver, timeout: float | None) -> AutoWait:
+    """Read assertion settings once and reuse AutoWait's validation."""
+    return AutoWait(
+        driver,
+        timeout=settings.get("assertions.timeout", 5.0) if timeout is None else timeout,
+        polling=settings.get("assertions.polling_interval", 0.25),
+        ignored_exceptions=(NoSuchElementException, StaleElementReferenceException),
+    )
+
+
+def _wait_for_assertion(
+    wait: AutoWait,
+    check: Callable[[], tuple[bool, str]],
+    message: str,
+) -> None:
+    """Poll a complete assertion decision; never invert missing/stale outcomes.
+
+    Each check owns its positive/negative semantics. Only missing/stale reads
+    retry here. Other failures propagate; diagnostics use the last poll only.
+    """
+    last_state = "not evaluated"
+    read_timeout: TimeoutException | None = None
+
+    def poll(_: WebDriver) -> bool:
+        nonlocal last_state, read_timeout
+        try:
+            passed, last_state = check()
+            return passed
+        except (NoSuchElementException, StaleElementReferenceException) as error:
+            last_state = type(error).__name__
+            return False
+        except TimeoutException as error:
+            # A driver command timeout is not the assertion's polling deadline.
+            read_timeout = error
+            raise
+
+    try:
+        wait.until(poll, msg=message)
+    except TimeoutException as error:
+        if error is read_timeout:
+            raise
+        raise AssertionError(f"{message}\nLast state: {last_state}") from error
 
 
 class LocatorAssertions:
-    """Auto-retry assertions for Locator elements."""
+    """Assert an element's state. Absence is allowed only for not_.to_be_visible()."""
 
     def __init__(self, locator: Locator, timeout: float | None = None,
                  is_negated: bool = False):
         self._locator = locator
-        self._timeout = timeout or Timeout.ASSERTION.value
-        self._polling = settings.get("assertions.polling_interval", 0.25)
+        self._wait = _assertion_wait(locator._resolve_driver(), timeout)
         self._is_negated = is_negated
 
     @property
-    def not_(self) -> "LocatorAssertions":
-        """Return a negated copy of this assertion.
-
-        Example:
-            expect(locator).not_.to_be_visible()
-        """
-        return LocatorAssertions(
-            self._locator, self._timeout, is_negated=not self._is_negated
-        )
-
-    # -- private helpers -------------------------------------------------- #
-
-    def _run(self, condition_fn, msg: str) -> None:
-        """Retry *condition_fn* until it agrees with the negation flag.
-
-        Delegates to :class:`AutoWait` so that timeout, polling, and the
-        ignored-exception list are defined in a single place.
-        """
-        from pylenium.waits.auto_wait import AutoWait
-        from selenium.common.exceptions import TimeoutException
-
-        driver = self._locator._resolve_driver()
-        auto_wait = AutoWait(driver, timeout=self._timeout, polling=self._polling)
-
-        try:
-            auto_wait.until(
-                lambda _: condition_fn() != self._is_negated,
-                msg=msg,
-            )
-        except TimeoutException:
-            negated_msg = " NOT" if self._is_negated else ""
-            raise AssertionError(
-                f"Assertion failed after {self._timeout}s:{negated_msg} {msg}"
-            )
-
-    def _evaluate(self, eval_fn) -> bool:
-        """Safely query the immediate DOM state via *eval_fn*.
-
-        Calls ``eval_fn(element)`` on the result of
-        :meth:`Locator._find_immediate`.  If the element is missing or stale,
-        returns ``False`` so the outer ``_run`` loop can retry.
-
-        **Not used** for ``to_be_visible`` / ``to_be_enabled`` — those
-        delegate to ``Locator.is_visible()`` / ``is_enabled()`` which
-        intentionally let ``NoSuchElementException`` propagate so that
-        negated assertions (``not_.to_be_enabled()``) retry correctly.
-        """
-        from selenium.common.exceptions import (
-            NoSuchElementException,
-            StaleElementReferenceException,
-        )
-
-        try:
-            element = self._locator._find_immediate()
-            return eval_fn(element)
-        except (NoSuchElementException, StaleElementReferenceException):
-            return False
-
-    # -- public assertion methods ----------------------------------------- #
-
-    def to_have_text(self, expected: str) -> None:
-        """Assert that the element's text content contains *expected*.
-
-        Uses ``_find_immediate()`` via ``_evaluate`` to avoid nested
-        AutoWait — calling ``locator.text()`` would block for up to
-        ``Timeout.DEFAULT`` inside its own wait, swallowing the assertion
-        timeout.
-        """
-        self._run(
-            lambda: self._evaluate(lambda el: expected in el.text),
-            f"Expected element to have text '{expected}'",
-        )
+    def not_(self) -> LocatorAssertions:
+        """Return the opposite expectation without changing the original or its settings."""
+        negated = copy(self)
+        negated._is_negated = not self._is_negated
+        return negated
 
     def to_be_visible(self) -> None:
-        """Assert that the element is visible on the page.
+        """Require visibility; the negative form also accepts an absent element."""
+        expected = not self._is_negated
 
-        Delegates to ``Locator.is_visible()`` which lets
-        ``NoSuchElementException`` propagate — ensuring
-        ``not_.to_be_visible()`` retries for missing elements.
-        """
-        self._run(
-            lambda: self._locator.is_visible(),
-            "Expected element to be visible",
+        def check() -> tuple[bool, str]:
+            try:
+                visible = self._locator._find_element().is_displayed()
+            except NoSuchElementException:
+                return self._is_negated, "missing"
+            return visible == expected, f"visible={visible}"
+
+        _wait_for_assertion(
+            self._wait, check,
+            f"Expected {self._locator!r} to have visible={expected}",
         )
 
     def to_be_enabled(self) -> None:
-        """Assert that the element is enabled.
+        """Require an existing enabled/disabled element; missing never passes."""
+        expected = not self._is_negated
 
-        Delegates to ``Locator.is_enabled()`` which lets
-        ``NoSuchElementException`` propagate — ensuring
-        ``not_.to_be_enabled()`` retries for missing elements.
-        """
-        self._run(
-            lambda: self._locator.is_enabled(),
-            "Expected element to be enabled",
+        def check() -> tuple[bool, str]:
+            enabled = self._locator._find_element().is_enabled()
+            return enabled == expected, f"enabled={enabled}"
+
+        _wait_for_assertion(
+            self._wait, check,
+            f"Expected {self._locator!r} to have enabled={expected}",
+        )
+
+    def to_have_text(self, expected: str) -> None:
+        """Require readable text containing (or not containing) the substring."""
+        def check() -> tuple[bool, str]:
+            actual = self._locator._find_element().text
+            passed = expected not in actual if self._is_negated else expected in actual
+            return passed, f"text={actual!r}"
+
+        comparison = "not contain" if self._is_negated else "contain"
+        _wait_for_assertion(
+            self._wait, check,
+            f"Expected {self._locator!r} to {comparison} text {expected!r}",
         )
 
     def to_have_attribute(self, name: str, value: str) -> None:
-        """Assert that the element has attribute *name* equal to *value*.
+        """Require a readable element's attribute/property to equal (or differ from) value.
 
-        Uses ``_find_immediate()`` via ``_evaluate`` to avoid nested
-        AutoWait — calling ``locator.get_attribute()`` would block for up
-        to ``Timeout.DEFAULT`` inside its own wait, swallowing the assertion
-        timeout.
+        A missing attribute is None and may satisfy the negative form.
+        A missing element cannot satisfy either form.
         """
-        self._run(
-            lambda: self._evaluate(lambda el: el.get_attribute(name) == value),
-            f"Expected element to have attribute '{name}' = '{value}'",
+        def check() -> tuple[bool, str]:
+            actual = self._locator._find_element().get_attribute(name)
+            passed = actual != value if self._is_negated else actual == value
+            return passed, f"attribute {name!r}={actual!r}"
+
+        comparison = "not equal" if self._is_negated else "equal"
+        _wait_for_assertion(
+            self._wait, check,
+            f"Expected {self._locator!r} attribute {name!r} to {comparison} {value!r}",
         )
 
 
 class PageAssertions:
-    """Auto-retry assertions for Page objects."""
+    """Retry title/URL substring checks; driver failures are not assertion mismatches."""
 
     def __init__(self, page: Page, timeout: float | None = None,
                  is_negated: bool = False):
         self._page = page
-        self._timeout = timeout or Timeout.ASSERTION.value
-        self._polling = settings.get("assertions.polling_interval", 0.25)
+        self._wait = _assertion_wait(page._driver, timeout)
         self._is_negated = is_negated
 
     @property
-    def not_(self) -> "PageAssertions":
-        """Return a negated copy of this assertion."""
-        return PageAssertions(
-            self._page, self._timeout, is_negated=not self._is_negated
-        )
-
-    def _run(self, condition_fn, msg: str) -> None:
-        """Retry *condition_fn* using :class:`AutoWait`."""
-        from pylenium.waits.auto_wait import AutoWait
-        from selenium.common.exceptions import TimeoutException
-
-        driver = getattr(self._page, "_driver", None) or getattr(self._page, "driver", None)
-        if not driver:
-            raise ValueError("WebDriver not available for assertion retry")
-
-        auto_wait = AutoWait(driver, timeout=self._timeout, polling=self._polling)
-
-        try:
-            auto_wait.until(
-                lambda _: condition_fn() != self._is_negated,
-                msg=msg,
-            )
-        except TimeoutException:
-            negated_msg = " NOT" if self._is_negated else ""
-            raise AssertionError(
-                f"Assertion failed after {self._timeout}s:{negated_msg} {msg}"
-            )
+    def not_(self) -> PageAssertions:
+        """Return the opposite expectation, preserving timeout and polling settings."""
+        negated = copy(self)
+        negated._is_negated = not self._is_negated
+        return negated
 
     def to_have_url(self, expected: str) -> None:
-        """Assert that the page URL contains the expected string."""
-        self._run(
-            lambda: expected in self._page.url(),
-            f"Expected page URL to contain '{expected}'",
-        )
+        """Require the URL to contain (or not contain) the substring."""
+        def check() -> tuple[bool, str]:
+            actual = self._page.url()
+            passed = expected not in actual if self._is_negated else expected in actual
+            return passed, f"url={actual!r}"
+
+        comparison = "not contain" if self._is_negated else "contain"
+        _wait_for_assertion(self._wait, check, f"Expected page URL to {comparison} {expected!r}")
 
     def to_have_title(self, expected: str) -> None:
-        """Assert that the page title contains the expected string."""
-        self._run(
-            lambda: expected in self._page.title(),
-            f"Expected page title to contain '{expected}'",
-        )
+        """Require the title to contain (or not contain) the substring."""
+        def check() -> tuple[bool, str]:
+            actual = self._page.title()
+            passed = expected not in actual if self._is_negated else expected in actual
+            return passed, f"title={actual!r}"
+
+        comparison = "not contain" if self._is_negated else "contain"
+        _wait_for_assertion(self._wait, check, f"Expected page title to {comparison} {expected!r}")
 
 
-def expect(target: Locator | Page) -> LocatorAssertions | PageAssertions:
-    """Create an assertion object for the given target.
+@overload
+def expect(target: Locator, *, timeout: float | None = None) -> LocatorAssertions: ...
 
-    This is the main entry point for smart assertions.
 
-    Args:
-        target: A Locator or Page instance.
+@overload
+def expect(target: Page, *, timeout: float | None = None) -> PageAssertions: ...
 
-    Returns:
-        LocatorAssertions or PageAssertions depending on the target type.
 
-    Raises:
-        TypeError: If the target is not a Locator or Page.
-    """
-    # Import here to avoid circular imports at module level
-    from pylenium.core.locator import Locator
-    from pylenium.core.page import Page
-
+def expect(target: Locator | Page, *, timeout: float | None = None) -> LocatorAssertions | PageAssertions:
+    """Create retrying assertions for a Locator or Page; timeout is in seconds."""
     if isinstance(target, Locator):
-        return LocatorAssertions(target)
-    elif isinstance(target, Page):
-        return PageAssertions(target)
-    else:
-        raise TypeError(
-            f"expect() requires a Locator or Page, got {type(target).__name__}"
-        )
+        return LocatorAssertions(target, timeout=timeout)
+    if isinstance(target, Page):
+        return PageAssertions(target, timeout=timeout)
+    raise TypeError(f"expect() requires a Locator or Page, got {type(target).__name__}")

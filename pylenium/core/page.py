@@ -8,6 +8,21 @@ from pylenium.config.config import settings
 from pylenium.core.locator import Locator
 
 
+def _xpath_literal(text: str) -> str:
+    """Escape text for use in XPath.
+
+    If it contains no single quotes, wrap in single quotes.
+    If it contains no double quotes, wrap in double quotes.
+    If it contains both, construct a concat() expression.
+    """
+    if "'" not in text:
+        return f"'{text}'"
+    if '"' not in text:
+        return f'"{text}"'
+    parts = text.split("'")
+    return "concat(" + ", \"'\", ".join(f"'{p}'" for p in parts) + ")"
+
+
 class Page:
     """Simplified Playwright-like interface wrapping Selenium WebDriver."""
 
@@ -40,8 +55,8 @@ class Page:
         """Create a Locator for the given CSS or XPath selector.
 
         Selector type is auto-detected:
-        - Starts with '/' or '(' → XPath
-        - Everything else → CSS
+        - Starts with '/' or '(' -> XPath
+        - Everything else -> CSS
 
         Args:
             selector: A CSS or XPath selector string.
@@ -64,14 +79,15 @@ class Page:
         Returns:
             A lazy Locator instance.
         """
-        if name:
+        if name is not None:
+            escaped_name = _xpath_literal(name)
             xpath = (
-                f"//*[@role='{role}']"
-                f"[normalize-space(@aria-label)='{name}' or "
-                f"normalize-space(text())='{name}']"
+                f"//*[@role={_xpath_literal(role)}]"
+                f"[normalize-space(@aria-label)={escaped_name} or "
+                f"normalize-space(text())={escaped_name}]"
             )
         else:
-            xpath = f"//*[@role='{role}']"
+            xpath = f"//*[@role={_xpath_literal(role)}]"
         return Locator(xpath, driver=self._driver)
 
     def get_by_text(self, text: str) -> Locator:
@@ -83,7 +99,7 @@ class Page:
         Returns:
             A lazy Locator instance.
         """
-        xpath = f"//*[normalize-space(text())='{text}']"
+        xpath = f"//*[normalize-space(text())={_xpath_literal(text)}]"
         return Locator(xpath, driver=self._driver)
 
     # -- Page actions --

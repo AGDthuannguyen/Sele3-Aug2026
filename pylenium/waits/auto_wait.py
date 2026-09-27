@@ -7,7 +7,7 @@ polling interval are read from Dynaconf settings.
 
 from __future__ import annotations
 
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable
 
 from selenium.common.exceptions import (
     TimeoutException,
@@ -17,51 +17,40 @@ from selenium.common.exceptions import (
     ElementNotInteractableException,
 )
 from selenium.webdriver.remote.webdriver import WebDriver
-from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support.ui import WebDriverWait
 
 from pylenium.config.config import settings
-from pylenium.waits.conditions import WaitCondition
-from pylenium.constants.timeouts import Timeout
-
-if TYPE_CHECKING:
-    from pylenium.core.locator import Locator
-
 
 class AutoWait:
     """Provides automatic waiting for element conditions."""
 
     def __init__(self, driver: WebDriver, timeout: float | None = None,
-                 polling: float | None = None):
+                 polling: float | None = None, *,
+                 ignored_exceptions: tuple[type[Exception], ...] | None = None):
+        """Configure retry errors in addition to Selenium's mandatory missing-element default.
+
+        Passing a tuple replaces Pylenium's extra defaults. As in WebDriverWait,
+        NoSuchElementException always retries, including when timeout is zero.
+        """
         self._driver = driver
-        self._timeout = timeout or Timeout.DEFAULT.value
-        self._polling = polling or settings.get("waits.polling_interval", 0.5)
-        self._ignored = (
+
+        t = settings.get("waits.timeout", 10.0) if timeout is None else timeout
+        p = settings.get("waits.polling_interval", 0.5) if polling is None else polling
+
+        if t < 0:
+            raise ValueError("Timeout cannot be negative")
+        if p <= 0:
+            raise ValueError("Polling interval must be > 0")
+
+        self._timeout = t
+        self._polling = p
+        extra_errors = ignored_exceptions if ignored_exceptions is not None else (
             StaleElementReferenceException,
             NoSuchElementException,
             ElementClickInterceptedException,
             ElementNotInteractableException,
         )
-
-    @staticmethod
-    def _to_tuple(locator: Locator | tuple) -> tuple:
-        """Convert a Locator or tuple into a (by, value) tuple."""
-        if isinstance(locator, tuple):
-            return locator
-        return locator._by, locator._value
-
-    def for_condition(self, locator: Locator | tuple,
-                      condition: WaitCondition) -> WebElement:
-        """Wait until the element satisfies the given WaitCondition.
-
-        Args:
-            locator: A ``Locator`` instance or a ``(by, value)`` tuple.
-            condition: The ``WaitCondition`` to wait for.
-
-        Returns:
-            The matching WebElement.
-        """
-        return self._wait_for(condition, self._to_tuple(locator))
+        self._ignored = tuple(dict.fromkeys((NoSuchElementException,) + extra_errors))
 
     def until(self, condition_fn: Callable, msg: str = "") -> Any:
         """Wait until a custom condition function returns a truthy value.
@@ -77,29 +66,16 @@ class AutoWait:
         Raises:
             TimeoutException: If the condition is not met within the timeout.
         """
+        if self._timeout == 0:
+            try:
+                result = condition_fn(self._driver)
+                if result:
+                    return result
+            except self._ignored:
+                pass
+            raise TimeoutException(msg)
+
         wait = WebDriverWait(
             self._driver, self._timeout, self._polling, ignored_exceptions=self._ignored
         )
         return wait.until(condition_fn, message=msg)
-
-    def _wait_for(self, condition: WaitCondition, locator_tuple: tuple) -> Any:
-        """Internal helper to wait for a specific WaitCondition.
-
-        Args:
-            condition: The WaitCondition to wait for.
-            locator_tuple: A (By, value) tuple.
-
-        Returns:
-            The result of the expected condition (usually a WebElement).
-
-        Raises:
-            TimeoutException: If the condition is not met within the timeout.
-        """
-        wait = WebDriverWait(
-            self._driver, self._timeout, self._polling, ignored_exceptions=self._ignored
-        )
-        ec = condition.get_expected_condition(locator_tuple)
-        return wait.until(ec, message=(
-            f"Timed out after {self._timeout}s waiting for element "
-            f"{locator_tuple} to be {condition.value}"
-        ))

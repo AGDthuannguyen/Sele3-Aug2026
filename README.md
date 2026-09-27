@@ -12,7 +12,20 @@ Configuration is managed through a priority-based system (CLI > Env Vars > YAML 
   - `PYLENIUM_BROWSER__BASE_URL=https://example.com`
 
 ### Smart Locators & Auto-Wait
-Locators in Pylenium are **lazy** and **auto-wait** by default. They do not query the DOM until an action is performed, preventing `StaleElementReferenceException`.
+Locators in Pylenium are **lazy** and **auto-wait** by default. They do not query the DOM until an action is performed, reducing the risk of `StaleElementReferenceException` by re-evaluating the DOM on retries.
+
+**Setup Example:**
+```python
+from pylenium import Browser
+
+# Launch session and get the new page
+browser = Browser.launch(headless=True)
+try:
+    page = browser.new_page()
+    page.goto("https://example.com")
+finally:
+    browser.close()
+```
 
 **Examples:**
 ```python
@@ -54,7 +67,7 @@ expect(username).to_have_attribute("type", "text")
 expect(username).to_have_text("Welcome")
 
 # Negation (asserting the opposite)
-expect(hidden_element).not_().to_be_visible()
+expect(hidden_element).not_.to_be_visible()
 
 # Page assertions
 expect(page).to_have_title("My Page")
@@ -73,7 +86,7 @@ Sele3-Aug2026/
 │   ├── assertions/         # Smart assertions (expect)
 │   ├── config/             # Dynaconf settings
 │   ├── core/               # Browser, Page, Locator, Strategies
-│   └── waits/              # AutoWait and Conditions
+│   └── waits/              # AutoWait backed by Selenium WebDriverWait
 ├── tests/                  # User tests
 │   └── html/               # Local test resources
 └── .gitignore
