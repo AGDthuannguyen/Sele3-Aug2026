@@ -45,15 +45,22 @@ class Browser:
 
         driver = BrowserFactory.create(b_type, options)
 
-        timeout = settings.get("browser.page_load_timeout", 30)
-        if timeout:
-            driver.set_page_load_timeout(timeout)
+        try:
+            timeout = settings.get("browser.page_load_timeout", 30)
+            if timeout is not None:
+                driver.set_page_load_timeout(timeout)
+        except Exception as setup_error:
+            try:
+                driver.quit()
+            except Exception as cleanup_error:
+                raise setup_error from cleanup_error
+            raise
 
         return cls(driver)
 
-    def new_page(self) -> Page:
-        """Create a new Page object associated with this browser."""
-        return Page(self._driver)
+    def new_page(self, *, base_url: str | None = None) -> Page:
+        """Wrap the current window; this does not create a tab or isolate a test."""
+        return Page(self._driver, base_url=base_url)
 
     def close(self) -> None:
         """Quit the browser session."""

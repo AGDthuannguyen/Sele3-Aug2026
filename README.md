@@ -18,7 +18,7 @@ Locators in Pylenium are **lazy** and **auto-wait** by default. They do not quer
 ```python
 from pylenium import Browser
 
-# Launch session and get the new page
+# Launch a session and wrap its current window
 browser = Browser.launch(headless=True)
 try:
     page = browser.new_page()
@@ -111,14 +111,14 @@ Sele3-Aug2026/
 ├── pyproject.toml          # Poetry configuration
 ├── config/                 # User environment configs
 ├── data/                   # Test data (JSON, CSV)
-├── pages/                  # Page Object Model (POM) classes
+├── pages/                  # The Internet page objects (LoginPage)
 ├── pylenium/               # Framework Core
 │   ├── assertions/         # Smart assertions (expect)
 │   ├── config/             # Dynaconf settings
 │   ├── core/               # Browser, Page, Locator, Strategies
+│   ├── plugins/            # pytest browser/page fixtures and CLI options
 │   └── waits/              # AutoWait backed by Selenium WebDriverWait
-├── tests/                  # User tests
-│   └── html/               # Local test resources
+├── tests/                  # Core unit tests and The Internet browser tests
 └── .gitignore
 ```
 
@@ -137,9 +137,77 @@ poetry install
 ### Running Tests
 The framework comes with a suite of tests to verify its core functionality (Browser, Locators, Assertions):
 ```bash
-poetry run pytest tests/ -v
+poetry run pytest tests/ --headless -v
 ```
 
-The new send_keys browser check uses https://the-internet.herokuapp.com/login
-and requires network access. Existing phase 3 local fixtures remain unchanged;
-phase 4's fixture/plugin infrastructure is not required.
+The Internet (https://the-internet.herokuapp.com/) is the browser test target
+for phase 4 and subsequent phases. Browser tests require network access and a
+working site; an outage is reported as a failure, not silently skipped.
+
+```bash
+poetry run pytest -m "not browser" -q  # Core and plugin tests, no website needed
+poetry run pytest -m browser --headless -q  # Live website integration tests
+```
+
+`tests/test_locator.py` and `tests/test_assertions.py` retain useful core regression
+tests from phase 3. Browser scenarios live in `tests/test_internet.py`; obsolete
+local HTML tests have been replaced. A few browser edge cases inject temporary
+elements into the current page to test quoting, readonly and contenteditable.
+
+Tests serve acceptance of the current phase, not a permanent suite requirement.
+Later phases may replace or remove checks that no longer serve their scope.
+BasePage unit checks reuse The Internet's LoginPage and URLs with a mock driver;
+they do not contact another website.
+
+## Phase 4: Page Objects and pytest
+
+After `poetry install`, pytest discovers the Pylenium plugin automatically through
+its `pytest11` entry point. No manual plugin registration is needed. Tests that
+request neither `browser` nor `page` do not launch a browser.
+
+```python
+from pages.login_page import LoginPage
+from pylenium import expect
+
+
+def test_login(internet_page):
+    login = LoginPage(internet_page).wait_until_loaded(timeout=5)
+    login.login("tomsmith", "SuperSecretPassword!")
+    expect(internet_page).to_have_url("/secure")
+```
+
+Run against The Internet, or pass --base-url for a compatible deployment:
+
+```bash
+poetry run pytest -m browser --browser=chrome --headless --base-url=https://the-internet.herokuapp.com/
+```
+
+- `browser` and `page` are function-scoped. Each requesting test gets a new
+  WebDriver session, closed in browser teardown even if page setup or the test fails.
+- `Browser.new_page()` wraps the current window; it creates neither a tab nor a
+  new session. The browser fixture owns cleanup. Tests normally should not call
+  `page.close()` or `browser.close()` themselves.
+- CLI values override configuration without mutating global settings. Omitting
+  `--browser`, `--headless`/`--headed`, or `--base-url` retains configured values.
+  The two display flags cannot be combined. Cross-browser certification belongs
+  to a later phase; these tests verify Chrome.
+- Relative navigation uses `urljoin`: with base `https://host/app/`, `child`
+  becomes `/app/child`, while `/child` starts at the host root. Absolute URLs,
+  including local `file:` URLs, remain unchanged. This corrects the previous
+  string-concatenation behavior for leading slashes.
+- `is_loaded()` must be an immediate boolean check. Do not call waiting locator
+  actions or assertions inside it. `wait_until_loaded(timeout=...)` owns one
+  readiness wait. `open()` only navigates using WebDriver's page-load timeout;
+  it does not silently add a readiness wait. Chain the two explicitly when needed.
+- `tests/conftest.py` defines `internet_page`: it uses the plugin's browser fixture,
+  applies the site's base URL and opens `/login`. The plugin's generic `page`
+  fixture remains unchanged for other applications. pytest discovers conftest
+  automatically; tests do not import it.
+- The multiline strings in `test_pytest_plugin.py` are executable subprocess
+  test modules created by pytester, not commented-out code. These checks exercise
+  real fixture teardown while mocking browser creation.
+
+Browser creation is cleaned up if post-launch configuration fails. A cleanup
+failure is chained to the original setup exception. Reporting, screenshots on
+failure, and CI integration are not implemented by this phase.
+>>>>>>> 45ac593 (Phase 4: Page Object Model (BasePage, Pytest Plugin & Fixtures))
