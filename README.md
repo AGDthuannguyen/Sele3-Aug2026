@@ -48,11 +48,16 @@ username.fill("alice")               # Clear and replace existing content
 username.send_keys(Keys.END, "123")  # Move to the end explicitly and type more
 ```
 
-`send_keys(*values)` waits for a visible, enabled element and forwards values to
-Selenium once. It does not clear content or reposition the cursor itself; typing
-follows the current cursor/selection. Only lookup/readiness is retried. Exceptions
-from the actual send command propagate unchanged, avoiding duplicated partial
-input or repeated keyboard actions. This is not an upload helper.
+`send_keys(*values)` resolves, checks visible/enabled state and sends within one
+wait. Stale during the command now retries against a fresh element, using the
+same timeout budget. It does not clear or reposition the cursor. Each retry
+resends all values, so partial input or keyboard effects may repeat. Other command
+errors propagate. This replaces the earlier send-once policy and is not an upload helper.
+
+`click()` uses a native Selenium click. If intercepted, it scrolls the target to
+the viewport center, then resolves again on the next poll under the original
+timeout. Scroll does not remove persistent overlays; these eventually time out.
+No JavaScript click is used to bypass browser interaction checks.
 
 `fill(text)` retries clear and typing together, clearing again before each retry.
 An empty string only clears the element. Unsupported targets raise `ValueError`;

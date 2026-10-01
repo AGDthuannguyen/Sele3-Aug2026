@@ -3,7 +3,7 @@
 import os
 from importlib import import_module
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, PropertyMock
 
 import pytest
 from selenium.common.exceptions import (
@@ -475,7 +475,7 @@ def test_send_keys_forwards_values_without_clearing(fast_action_waits):
 
 
 @pytest.mark.parametrize("failure", [
-    StaleElementReferenceException, ElementNotInteractableException,
+    ElementNotInteractableException,
     InvalidSessionIdException, TypeError,
 ])
 def test_send_keys_does_not_repeat_partial_input(fast_action_waits, failure):
@@ -564,3 +564,169 @@ def test_send_keys_preserves_content_and_cursor_on_the_internet(internet_page):
     assert username.get_attribute("value") == "old appended"
     username.send_keys(Keys.HOME, "prefix ")
     assert username.get_attribute("value") == "prefix old appended"
+
+
+def test_send_keys_retries_stale_command_with_fresh_parent(fast_action_waits):
+    driver = Mock()
+    old_parent, new_parent = _editable_element(), _editable_element()
+    old, new = _editable_element(), _editable_element()
+    driver.find_elements.side_effect = [[old_parent], [new_parent]]
+    old_parent.find_elements.return_value = [old]
+    new_parent.find_elements.return_value = [new]
+    old.send_keys.side_effect = StaleElementReferenceException("replaced during send")
+    Locator("#parent", driver=driver).locator("input").send_keys("abc", Keys.ENTER)
+    old.send_keys.assert_called_once_with("abc", Keys.ENTER)
+    new.send_keys.assert_called_once_with("abc", Keys.ENTER)
+    assert driver.find_elements.call_count == 2
+    old.clear.assert_not_called()
+    new.clear.assert_not_called()
+
+
+def test_send_keys_stale_retry_can_repeat_partial_input(fast_action_waits):
+    driver = Mock()
+    old, new = _editable_element(), _editable_element()
+    driver.find_elements.side_effect = [[old], [new]]
+    contents = []
+
+    def partial_send(text):
+        contents.append(text[:2])
+        raise StaleElementReferenceException("input copied into replacement")
+
+    old.send_keys.side_effect = partial_send
+    new.send_keys.side_effect = contents.append
+    Locator("input", driver=driver).send_keys("hello")
+    assert "".join(contents) == "hehello"
+    new.send_keys.assert_called_once_with("hello")
+    new.clear.assert_not_called()
+
+
+def test_send_keys_continuously_stale_times_out(fast_action_waits):
+    driver = Mock()
+    element = _editable_element()
+    driver.find_elements.return_value = [element]
+    element.send_keys.side_effect = StaleElementReferenceException("always replaced")
+    with pytest.raises(TimeoutException):
+        Locator("input", driver=driver).send_keys("text")
+    assert driver.find_elements.call_count == element.send_keys.call_count
+    assert element.send_keys.call_count > 1
+
+
+def test_click_success_does_not_scroll(fast_action_waits):
+    driver = Mock()
+    element = _editable_element()
+    driver.find_elements.return_value = [element]
+    Locator("button", driver=driver).click()
+    element.click.assert_called_once()
+    driver.execute_script.assert_not_called()
+
+
+@pytest.mark.parametrize("stale_during_scroll", [False, True])
+def test_intercepted_click_scrolls_then_resolves_again(fast_action_waits, stale_during_scroll):
+    driver = Mock()
+    old, new = _editable_element(), _editable_element()
+    driver.find_elements.side_effect = [[old], [new]]
+    events = []
+
+    def blocked_click():
+        events.append("intercepted")
+        raise ElementClickInterceptedException("footer")
+
+    def scroll(script, element):
+        assert element is old
+        assert "scrollIntoView" in script and "'center'" in script
+        events.append("scroll")
+        if stale_during_scroll:
+            raise StaleElementReferenceException("replaced during scroll")
+
+    old.click.side_effect = blocked_click
+    driver.execute_script.side_effect = scroll
+    new.click.side_effect = lambda: events.append("click replacement")
+    Locator("button", driver=driver).click()
+    assert events == ["intercepted", "scroll", "click replacement"]
+    assert driver.find_elements.call_count == 2
+    old.click.assert_called_once()
+    new.click.assert_called_once()
+
+
+def test_permanent_overlay_keeps_original_timeout(monkeypatch):
+    clock = SimpleNamespace(now=0.0)
+
+    def advance(seconds):
+        clock.now += seconds
+
+    monkeypatch.setattr(import_module("selenium.webdriver.support.wait"), "time",
+                        SimpleNamespace(monotonic=lambda: clock.now, sleep=advance))
+    config = {"waits.timeout": 1, "waits.polling_interval": 0.25}
+    monkeypatch.setattr("pylenium.waits.auto_wait.settings",
+                        SimpleNamespace(get=lambda key, default=None: config.get(key, default)))
+    driver = Mock()
+    element = _editable_element()
+    driver.find_elements.return_value = [element]
+    element.click.side_effect = ElementClickInterceptedException("persistent overlay")
+    with pytest.raises(TimeoutException):
+        Locator("button", driver=driver).click()
+    assert 1 <= clock.now <= 1.25
+    assert driver.execute_script.call_count == element.click.call_count
+
+
+def test_scroll_session_error_propagates(fast_action_waits):
+    driver = Mock()
+    element = _editable_element()
+    driver.find_elements.return_value = [element]
+    element.click.side_effect = ElementClickInterceptedException("blocked")
+    error = InvalidSessionIdException("closed")
+    driver.execute_script.side_effect = error
+    with pytest.raises(InvalidSessionIdException) as caught:
+        Locator("button", driver=driver).click()
+    assert caught.value is error
+    element.click.assert_called_once()
+
+
+@pytest.mark.parametrize("method", ["text", "get_attribute"])
+def test_read_retries_stale_after_lookup(fast_action_waits, method):
+    driver = Mock()
+    old, new = _editable_element(), _editable_element()
+    driver.find_elements.side_effect = [[old], [new]]
+    if method == "text":
+        type(old).text = PropertyMock(side_effect=StaleElementReferenceException("read stale"))
+        new.text = "fresh"
+        args = ()
+    else:
+        old.get_attribute.side_effect = StaleElementReferenceException("read stale")
+        new.get_attribute.return_value = "fresh"
+        args = ("value",)
+    assert getattr(Locator("input", driver=driver), method)(*args) == "fresh"
+    assert driver.find_elements.call_count == 2
+
+
+def test_click_recovers_from_fixed_footer_on_the_internet(internet_page):
+    driver = internet_page._driver
+    driver.execute_script("""
+        const area = document.createElement('div');
+        area.id = 'click-recovery-area';
+        area.style.cssText = 'position:relative;height:3000px';
+        const button = document.createElement('button');
+        button.id = 'click-recovery-target';
+        button.style.cssText = 'position:absolute;top:1500px;height:30px';
+        button.textContent = 'Recovery target';
+        button.dataset.clicks = '0';
+        button.onclick = () => button.dataset.clicks = String(Number(button.dataset.clicks) + 1);
+        area.appendChild(button);
+        document.body.appendChild(area);
+        const footer = document.createElement('div');
+        footer.id = 'click-recovery-footer';
+        footer.style.cssText = 'position:fixed;bottom:0;left:0;width:100%;height:100px;z-index:2147483647;background:white';
+        document.body.appendChild(footer);
+        window.scrollTo(0, window.scrollY + button.getBoundingClientRect().top - window.innerHeight + 50);
+    """)
+    try:
+        target = internet_page.locator("#click-recovery-target")
+        with pytest.raises(ElementClickInterceptedException):
+            driver.find_element("id", "click-recovery-target").click()
+        target.click()
+        assert target.get_attribute("data-clicks") == "1"
+    finally:
+        driver.execute_script("""
+            document.getElementById('click-recovery-area')?.remove();
+            document.getElementById('click-recovery-footer')?.remove();
+        """)

@@ -12,7 +12,7 @@ from selenium.common.exceptions import (
     NoSuchElementException,
     StaleElementReferenceException,
 )
-from selenium.webdriver.common.by import By
+from selenium.webdriver.common.by import By, ByType
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 
@@ -21,7 +21,7 @@ from pylenium.waits.auto_wait import AutoWait
 T = TypeVar("T")
 
 
-def _parse_selector(selector: str) -> tuple[str, str]:
+def _parse_selector(selector: str) -> tuple[ByType, str]:
     """Recognize XPath prefixes; otherwise use CSS."""
     if selector.startswith(("/", "(", "./")):
         return By.XPATH, selector
@@ -71,10 +71,18 @@ class Locator:
     def click(self) -> None:
         """Wait for visible/enabled, then click; retry stale or obstructed targets.
 
-        A successful click is never repeated. Other driver failures propagate.
+        Intercepted clicks scroll to the viewport center before the next poll.
+        Each poll resolves again under the same timeout. Other failures propagate.
         """
+        def click_or_scroll(element: WebElement) -> None:
+            try:
+                element.click()
+            except ElementClickInterceptedException:
+                self._scroll_into_view(element)
+                raise
+
         self._wait_and_apply(
-            lambda element: element.click(),
+            click_or_scroll,
             description="click",
             ready=lambda element: element.is_displayed() and element.is_enabled(),
             retry_exceptions=(ElementClickInterceptedException, ElementNotInteractableException),
@@ -83,17 +91,15 @@ class Locator:
     def send_keys(self, *values: str) -> None:
         """Send keys at the current cursor/selection without clearing or repositioning.
 
-        Waits for a visible and enabled element, then sends the values once.
-        Only the readiness check is retried; if the actual send_keys command
-        fails (e.g. element becomes stale during the send), the error propagates
-        unchanged.
+        Resolve, check readiness and send within one wait so stale commands
+        retry against a fresh element. A retry resends all values; partial input
+        or keyboard effects may repeat. Other command failures propagate.
         """
-        element = self._wait_and_apply(
-            lambda element: element,
+        self._wait_and_apply(
+            lambda element: element.send_keys(*values),
             description="send keys",
             ready=lambda element: element.is_displayed() and element.is_enabled(),
         )
-        element.send_keys(*values)
 
     def fill(self, text: str) -> None:
         """Replace editable content with text, retrying clear/send_keys as a unit.
@@ -167,6 +173,13 @@ class Locator:
     def count(self) -> int:
         """Count selector matches immediately, retaining the existing collection semantics."""
         return len(self._find_elements())
+
+    def _scroll_into_view(self, element: WebElement) -> None:
+        """Reposition an intercepted target without bypassing native click checks."""
+        self._resolve_driver().execute_script(
+            "arguments[0].scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});",
+            element,
+        )
 
     def _resolve_driver(self) -> WebDriver:
         """Use this locator's driver, or inherit it from the parent."""
