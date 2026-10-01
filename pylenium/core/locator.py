@@ -15,7 +15,6 @@ from selenium.common.exceptions import (
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
-from selenium.webdriver.support import expected_conditions as EC
 
 from pylenium.waits.auto_wait import AutoWait
 
@@ -29,8 +28,8 @@ def _parse_selector(selector: str) -> tuple[str, str]:
     return By.CSS_SELECTOR, selector
 
 
-def _is_editable(element: WebElement) -> bool:
-    """Wait for editable state, but reject targets that fill() cannot accept."""
+def _validate_fill_target(element: WebElement) -> None:
+    """Reject targets that fill() cannot accept."""
     tag = element.tag_name.lower()
     if tag == "input":
         input_type = element.get_property("type")
@@ -40,8 +39,13 @@ def _is_editable(element: WebElement) -> bool:
     elif tag != "textarea" and not element.get_property("isContentEditable"):
         raise ValueError("fill() requires an input, textarea, or contenteditable element")
 
-    if not EC.element_to_be_clickable(element)(None):
+
+def _is_ready_for_fill(element: WebElement) -> bool:
+    """Check editable state once; reject unsupported targets on every attempt."""
+    _validate_fill_target(element)
+    if not (element.is_displayed() and element.is_enabled()):
         return False
+    tag = element.tag_name.lower()
     return tag not in {"input", "textarea"} or element.get_dom_attribute("readonly") is None
 
 
@@ -72,9 +76,24 @@ class Locator:
         self._wait_and_apply(
             lambda element: element.click(),
             description="click",
-            ready=lambda element: bool(EC.element_to_be_clickable(element)(None)),
+            ready=lambda element: element.is_displayed() and element.is_enabled(),
             retry_exceptions=(ElementClickInterceptedException, ElementNotInteractableException),
         )
+
+    def send_keys(self, *values: str) -> None:
+        """Send keys at the current cursor/selection without clearing or repositioning.
+
+        Waits for a visible and enabled element, then sends the values once.
+        Only the readiness check is retried; if the actual send_keys command
+        fails (e.g. element becomes stale during the send), the error propagates
+        unchanged.
+        """
+        element = self._wait_and_apply(
+            lambda element: element,
+            description="send keys",
+            ready=lambda element: element.is_displayed() and element.is_enabled(),
+        )
+        element.send_keys(*values)
 
     def fill(self, text: str) -> None:
         """Replace editable content with text, retrying clear/send_keys as a unit.
@@ -96,7 +115,7 @@ class Locator:
         self._wait_and_apply(
             replace_text,
             description="fill",
-            ready=_is_editable,
+            ready=_is_ready_for_fill,
             retry_exceptions=(InvalidElementStateException,),
         )
 
@@ -105,7 +124,7 @@ class Locator:
         return self._wait_and_apply(
             lambda element: element.text,
             description="read text",
-            ready=lambda element: bool(EC.visibility_of(element)(None)),
+            ready=lambda element: element.is_displayed(),
         )
 
     def get_attribute(self, name: str) -> str | None:
@@ -119,21 +138,15 @@ class Locator:
         )
 
     def is_visible(self) -> bool:
-        """Read visibility without waiting. Missing raises; stale returns False.
+        """Read visibility without waiting. Missing and stale elements raise.
 
         This snapshot is not a retry predicate; assertions resolve independently.
         """
-        try:
-            return self._find_element().is_displayed()
-        except StaleElementReferenceException:
-            return False
+        return self._find_element().is_displayed()
 
     def is_enabled(self) -> bool:
-        """Read enabled state without waiting. Missing raises; stale returns False."""
-        try:
-            return self._find_element().is_enabled()
-        except StaleElementReferenceException:
-            return False
+        """Read enabled state without waiting. Missing and stale elements raise."""
+        return self._find_element().is_enabled()
 
     def locator(self, selector: str) -> Locator:
         """Create a lazy child selector within this element."""

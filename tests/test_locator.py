@@ -12,6 +12,7 @@ from selenium.common.exceptions import (
     InvalidSessionIdException, NoSuchElementException, StaleElementReferenceException,
     TimeoutException,
 )
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webelement import WebElement
 
 from pylenium import Browser, Locator
@@ -426,3 +427,140 @@ def test_fill_waits_for_real_readonly_input(page):
         assert locator.get_attribute("value") == "ready"
     finally:
         page._driver.execute_script("document.getElementById('readonly-contract')?.remove();")
+
+
+@pytest.mark.parametrize("method,accessor", [
+    ("is_visible", "is_displayed"), ("is_enabled", "is_enabled"),
+])
+@pytest.mark.parametrize("failure_stage", ["missing", "stale_lookup", "stale_read"])
+def test_snapshot_propagates_missing_and_stale(method, accessor, failure_stage):
+    driver = Mock()
+    element = _editable_element()
+    error_type = NoSuchElementException if failure_stage == "missing" else StaleElementReferenceException
+    error = error_type("cannot read current element")
+    if failure_stage == "stale_read":
+        driver.find_elements.return_value = [element]
+        getattr(element, accessor).side_effect = error
+    else:
+        driver.find_elements.side_effect = error
+
+    with pytest.raises(error_type) as caught:
+        getattr(Locator("#input", driver=driver), method)()
+
+    assert caught.value is error
+    driver.find_elements.assert_called_once()
+
+
+@pytest.mark.parametrize("method,accessor", [
+    ("is_visible", "is_displayed"), ("is_enabled", "is_enabled"),
+])
+def test_snapshot_returns_actual_false(method, accessor):
+    driver = Mock()
+    element = _editable_element()
+    getattr(element, accessor).return_value = False
+    driver.find_elements.return_value = [element]
+    assert getattr(Locator("#input", driver=driver), method)() is False
+    driver.find_elements.assert_called_once()
+
+
+def test_send_keys_forwards_values_without_clearing(fast_action_waits):
+    driver = Mock()
+    element = _editable_element()
+    driver.find_elements.return_value = [element]
+
+    Locator("#input", driver=driver).send_keys("abc", "def", Keys.ENTER)
+
+    element.clear.assert_not_called()
+    element.send_keys.assert_called_once_with("abc", "def", Keys.ENTER)
+
+
+@pytest.mark.parametrize("failure", [
+    StaleElementReferenceException, ElementNotInteractableException,
+    InvalidSessionIdException, TypeError,
+])
+def test_send_keys_does_not_repeat_partial_input(fast_action_waits, failure):
+    driver = Mock()
+    element = _editable_element()
+    driver.find_elements.return_value = [element]
+    contents = ["old"]
+    error = failure("failed after partial input")
+
+    def partial_send(text):
+        contents.append(text[:2])
+        raise error
+
+    element.send_keys.side_effect = partial_send
+    with pytest.raises(failure) as caught:
+        Locator("#input", driver=driver).send_keys("hello")
+
+    assert caught.value is error
+    assert "".join(contents) == "oldhe"
+    element.clear.assert_not_called()
+    element.send_keys.assert_called_once_with("hello")
+    driver.find_elements.assert_called_once()
+
+
+@pytest.mark.parametrize("state", ["missing", "stale_lookup", "stale_read", "hidden", "disabled"])
+def test_send_keys_resolves_again_until_ready(fast_action_waits, state):
+    driver = Mock()
+    first, replacement = _editable_element(), _editable_element()
+    observations = {
+        "missing": [],
+        "stale_lookup": StaleElementReferenceException("parent replaced"),
+    }
+    driver.find_elements.side_effect = [observations.get(state, [first]), [replacement]]
+    if state == "stale_read":
+        first.is_displayed.side_effect = StaleElementReferenceException("element replaced")
+    if state == "hidden":
+        first.is_displayed.return_value = False
+    if state == "disabled":
+        first.is_enabled.return_value = False
+
+    Locator("#input", driver=driver).send_keys("ready")
+
+    assert driver.find_elements.call_count == 2
+    first.send_keys.assert_not_called()
+    replacement.send_keys.assert_called_once_with("ready")
+    first.clear.assert_not_called()
+    replacement.clear.assert_not_called()
+
+
+def test_send_keys_timeout_does_not_send(fast_action_waits):
+    driver = Mock()
+    element = _editable_element()
+    element.is_enabled.return_value = False
+    driver.find_elements.return_value = [element]
+    with pytest.raises(TimeoutException):
+        Locator("#input", driver=driver).send_keys("never sent")
+    element.send_keys.assert_not_called()
+    element.clear.assert_not_called()
+
+
+def test_text_waits_for_visibility_and_accepts_empty_result(fast_action_waits):
+    driver = Mock()
+    element = _editable_element()
+    element.is_displayed.side_effect = [False, True]
+    driver.find_elements.return_value = [element]
+    assert Locator("#empty", driver=driver).text() == ""
+    assert driver.find_elements.call_count == 2
+
+
+@pytest.fixture
+def internet_page():
+    """Use The Internet for new integration checks without changing old fixtures."""
+    browser = Browser.launch(headless=True)
+    try:
+        page = browser.new_page()
+        page.goto("https://the-internet.herokuapp.com/login")
+        yield page
+    finally:
+        browser.close()
+
+
+def test_send_keys_preserves_content_and_cursor_on_the_internet(internet_page):
+    username = internet_page.locator("#username")
+    username.fill("old")
+    username.send_keys(Keys.END, " appended")
+    assert username.get_attribute("value") == "old appended"
+    username.send_keys(Keys.HOME, "prefix ")
+    assert username.get_attribute("value") == "prefix old appended"

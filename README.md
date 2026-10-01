@@ -40,6 +40,31 @@ button.click()             # Waits for clickable, then clicks
 text = link.text()         # Waits for visible, then returns text
 ```
 
+**Replacing text vs sending keys:**
+```python
+from selenium.webdriver.common.keys import Keys
+
+username.fill("alice")               # Clear and replace existing content
+username.send_keys(Keys.END, "123")  # Move to the end explicitly and type more
+```
+
+`send_keys(*values)` waits for a visible, enabled element and forwards values to
+Selenium once. It does not clear content or reposition the cursor itself; typing
+follows the current cursor/selection. Only lookup/readiness is retried. Exceptions
+from the actual send command propagate unchanged, avoiding duplicated partial
+input or repeated keyboard actions. This is not an upload helper.
+
+`fill(text)` retries clear and typing together, clearing again before each retry.
+An empty string only clears the element. Unsupported targets raise `ValueError`;
+hidden, disabled or readonly editable controls wait until ready.
+
+**Immediate state queries (behavior change):** `is_visible()` and `is_enabled()`
+read once without waiting. Missing and stale elements now raise their Selenium
+exceptions; stale is no longer converted to `False`. A valid hidden or disabled
+element still returns `False`. Use `expect()` when retrying assertions are needed;
+stale retries in both positive and negative assertions, and only negative
+visibility accepts a missing element.
+
 **Child Scope & Collections:**
 You can chain locators to search within a parent element, or interact with multiple elements.
 ```python
@@ -109,3 +134,7 @@ The framework comes with a suite of tests to verify its core functionality (Brow
 ```bash
 poetry run pytest tests/ -v
 ```
+
+The new send_keys browser check uses https://the-internet.herokuapp.com/login
+and requires network access. Existing phase 3 local fixtures remain unchanged;
+phase 4's fixture/plugin infrastructure is not required.
