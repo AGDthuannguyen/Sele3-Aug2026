@@ -75,3 +75,18 @@ def test_navigation_uses_standard_url_resolution(url, expected):
     driver.get.assert_called_once_with(expected)
 
 
+def test_screenshot_saves_the_same_capture(tmp_path):
+    driver = Mock()
+    driver.get_screenshot_as_png.return_value = b"png"
+    destination = tmp_path / "capture.png"
+    assert Page(driver).screenshot(str(destination)) == destination.read_bytes() == b"png"
+    driver.get_screenshot_as_png.assert_called_once()
+
+
+def test_screenshot_can_return_bytes_without_a_file():
+    driver = Mock()
+    driver.get_screenshot_as_png.return_value = b"png"
+    assert Page(driver).screenshot() == b"png"
+    driver.get_screenshot_as_png.assert_called_once()
+
+

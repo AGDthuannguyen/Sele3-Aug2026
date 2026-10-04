@@ -18,6 +18,13 @@ sequenceDiagram
         Test->>Page: page.goto(), locator.click(), expect()...
         Test-->>Plugin: Test result
 
+        opt Setup or test body failed with a browser session
+            Plugin->>Page: screenshot(path), one PNG capture
+            Page-->>Plugin: PNG bytes
+            Note over Plugin: Save artifact and attach through allure-pytest
+            Note over Plugin: Capture errors preserve the original failure
+        end
+
         Note over Plugin,Browser: Finally, including dependent fixture/test failure
         Plugin->>Browser: browser.close() / driver.quit()
     end

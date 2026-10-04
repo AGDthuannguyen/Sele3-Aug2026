@@ -150,7 +150,8 @@ poetry run pytest -m browser --headless -q  # Live website integration tests
 ```
 
 `tests/test_locator.py` and `tests/test_assertions.py` retain useful core regression
-tests from phase 3. Browser scenarios live in `tests/test_internet.py`; obsolete
+tests from phase 3. Browser scenarios use the `browser` marker in
+`tests/test_internet.py` and `tests/test_locator.py`; obsolete
 local HTML tests have been replaced. A few browser edge cases inject temporary
 elements into the current page to test quoting, readonly and contenteditable.
 
@@ -208,6 +209,40 @@ poetry run pytest -m browser --browser=chrome --headless --base-url=https://the-
   real fixture teardown while mocking browser creation.
 
 Browser creation is cleaned up if post-launch configuration fails. A cleanup
-failure is chained to the original setup exception. Reporting, screenshots on
-failure, and CI integration are not implemented by this phase.
->>>>>>> 45ac593 (Phase 4: Page Object Model (BasePage, Pytest Plugin & Fixtures))
+failure is chained to the original setup exception.
+
+## Batch 1: Failure reporting and GitHub Actions
+
+The pytest plugin captures one PNG when setup or the test body fails and its
+browser fixture has a session. Capture happens before browser teardown, including
+when a dependent page fixture fails. It never launches a browser for reporting.
+Tests that close their session early may have no screenshot. Teardown failures
+do not trigger screenshots because the session may already be closed.
+
+Screenshots are saved under `artifacts/screenshots` (override with
+`--screenshots-dir`) and attached through `allure-pytest` when that plugin is
+installed. Capture or attachment errors are diagnostic messages; they do not
+replace the test failure or prevent cleanup. Set
+`PYLENIUM_REPORTING__SCREENSHOT_ON_FAILURE=false` to disable capture.
+
+```bash
+poetry run pytest --headless --junitxml=artifacts/junit.xml --alluredir=artifacts/allure-results
+```
+
+Allure results are raw data, not an HTML report. With the Allure command-line tool
+installed separately, run `allure serve artifacts/allure-results` to view them.
+Use a fresh results directory for each run to avoid mixing old and new results.
+
+`.github/workflows/verify.yml` runs on branch pushes, pull requests targeting
+`main`, and manual dispatch. It installs the locked dependencies on Python 3.12
+and runs two independent jobs: unit/plugin tests and Chrome headless integration
+tests. The unit job checks whitespace in the committed changes. Both jobs upload
+available JUnit, Allure, and screenshot artifacts even if tests fail; artifacts
+are retained for 14 days. New runs cancel superseded runs for the same event/ref.
+
+Browser tests require Chrome and network access to The Internet. Navigation
+timeouts fail CI; the workflow does not skip failures or retry the suite to hide
+them. Inspect the failed step and downloaded artifacts from the Actions run.
+Actual GitHub execution must be verified after pushing this workflow. Jenkins,
+parallel execution, cross-browser certification, and package publishing remain
+outside Batch 1.

@@ -21,6 +21,7 @@ build-backend = "poetry.core.masonry.api"
 pylenium = "pylenium.plugins.pytest_plugin"
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 markers = ["browser: live browser tests against The Internet (network required)"]
 pythonpath = ["."]
 

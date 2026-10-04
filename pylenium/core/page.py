@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -109,14 +110,12 @@ class Page:
 
     # -- Page actions --
 
-    def screenshot(self, path: str) -> bytes:
-        """Take a screenshot and save it to the specified path.
-
-        Returns:
-            The screenshot data as bytes.
-        """
-        self._driver.save_screenshot(path)
-        return self._driver.get_screenshot_as_png()
+    def screenshot(self, path: str | None = None) -> bytes:
+        """Capture once, optionally save the same PNG bytes, and return them."""
+        image = self._driver.get_screenshot_as_png()
+        if path is not None:
+            Path(path).write_bytes(image)
+        return image
 
     def close(self) -> None:
         """Close the current window; closing the last window ends the session."""

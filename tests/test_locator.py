@@ -420,18 +420,7 @@ def test_text_waits_for_visibility_and_accepts_empty_result(fast_action_waits):
     assert driver.find_elements.call_count == 2
 
 
-@pytest.fixture
-def internet_page():
-    """Use The Internet for new integration checks without changing old fixtures."""
-    browser = Browser.launch(headless=True)
-    try:
-        page = browser.new_page()
-        page.goto("https://the-internet.herokuapp.com/login")
-        yield page
-    finally:
-        browser.close()
-
-
+@pytest.mark.browser
 def test_send_keys_preserves_content_and_cursor_on_the_internet(internet_page):
     username = internet_page.locator("#username")
     username.fill("old")
@@ -574,6 +563,7 @@ def test_read_retries_stale_after_lookup(fast_action_waits, method):
     assert driver.find_elements.call_count == 2
 
 
+@pytest.mark.browser
 def test_click_recovers_from_fixed_footer_on_the_internet(internet_page):
     driver = internet_page._driver
     driver.execute_script("""

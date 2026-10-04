@@ -6,6 +6,7 @@ Only browser creation is mocked; pytest performs fixture setup and teardown.
 """
 
 from unittest.mock import Mock
+import json
 
 import pytest
 
@@ -124,3 +125,64 @@ def test_launch_cleans_up_failed_configuration(monkeypatch, cleanup_fails):
     if cleanup_fails:
         assert caught.value.__cause__ is cleanup_error
     driver.quit.assert_called_once()
+
+
+@pytest.mark.parametrize("scenario", [
+    "pass", "call", "setup", "closed", "capture_error", "no_browser", "disabled", "attachment_error",
+])
+def test_failure_screenshots_preserve_result_and_cleanup(pytester, scenario):
+    pytester.makeconftest('''
+import pytest
+from unittest.mock import Mock
+from selenium.common.exceptions import InvalidSessionIdException
+from pylenium import Browser
+from types import SimpleNamespace
+
+@pytest.fixture(autouse=True)
+def fake_browser(monkeypatch):
+    driver = Mock()
+    driver.get_screenshot_as_png.return_value = b"test-png"
+    if SCENARIO == "closed":
+        driver.get_screenshot_as_png.side_effect = InvalidSessionIdException("closed")
+    if SCENARIO == "capture_error":
+        driver.get_screenshot_as_png.side_effect = RuntimeError("capture failed")
+    factory = Mock(return_value=Browser(driver))
+    monkeypatch.setattr(Browser, "launch", factory)
+    if SCENARIO == "disabled":
+        monkeypatch.setattr("pylenium.plugins.pytest_plugin.settings", SimpleNamespace(get=lambda key, default=None: False))
+    if SCENARIO == "attachment_error":
+        import allure
+        monkeypatch.setattr(allure, "attach", Mock(side_effect=RuntimeError("attachment failed")))
+    yield
+    if SCENARIO == "no_browser":
+        factory.assert_not_called()
+        driver.quit.assert_not_called()
+    else:
+        driver.quit.assert_called_once()
+    assert driver.get_screenshot_as_png.call_count == (0 if SCENARIO in ("pass", "no_browser", "disabled") else 1)
+
+@pytest.fixture
+def prepared(page):
+    if SCENARIO == "setup":
+        raise ValueError("original setup failure")
+    return page
+'''.replace("SCENARIO", repr(scenario)))
+    fixture = "" if scenario == "no_browser" else "prepared"
+    pytester.makepyfile(f'def test_example({fixture}):\n    assert {scenario == "pass"!r}, "original test failure"')
+    result = pytester.runpytest_subprocess(
+        "-q", "--alluredir=results", "--screenshots-dir=shots", "--junitxml=result.xml",
+    )
+    result.assert_outcomes(**({"passed": 1} if scenario == "pass" else
+                             {"errors": 1} if scenario == "setup" else {"failed": 1}))
+    assert result.ret == (0 if scenario == "pass" else 1)
+    screenshots = list((pytester.path / "shots").glob("*.png"))
+    assert len(screenshots) == (1 if scenario in ("call", "setup", "attachment_error") else 0)
+    records = [json.loads(path.read_text()) for path in (pytester.path / "results").glob("*-result.json")]
+    assert len(records) == 1
+    attachments = records[0].get("attachments", [])
+    pngs = [entry for entry in attachments if entry["type"] == "image/png"]
+    assert len(pngs) == (1 if scenario in ("call", "setup") else 0)
+    if pngs:
+        assert (pytester.path / "results" / pngs[0]["source"]).read_bytes() == b"test-png"
+    if scenario in ("closed", "capture_error", "attachment_error"):
+        result.stdout.fnmatch_lines(["*Failure screenshot unavailable:*"])
