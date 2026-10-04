@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
@@ -14,6 +15,22 @@ from pylenium.core.page import Page
 
 _browser_session = pytest.StashKey[Browser]()
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _reporting_request_timeout(session: Browser) -> Iterator[None]:
+    """Bound driver HTTP reads during diagnostics/cleanup, then restore settings.
+
+    Selenium's page-load timeout does not bound screenshot or quit requests.
+    HTTP retries can cause multiple reads; the CI step also has an outer limit.
+    """
+    config = session._driver.command_executor.client_config
+    previous_timeout = config.timeout
+    config.timeout = 10
+    try:
+        yield
+    finally:
+        config.timeout = previous_timeout
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -48,7 +65,8 @@ def browser(pytestconfig: pytest.Config, request: pytest.FixtureRequest) -> Iter
         yield session
     finally:
         del request.node.stash[_browser_session]
-        session.close()
+        with _reporting_request_timeout(session):
+            session.close()
 
 
 @pytest.fixture
@@ -74,7 +92,8 @@ def pytest_runtest_makereport(
         directory = Path(item.config.getoption("--screenshots-dir"))
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{report.when}-{uuid4().hex}.png"
-        image = Page(session._driver).screenshot(str(path))
+        with _reporting_request_timeout(session):
+            image = Page(session._driver).screenshot(str(path))
         report.sections.append(("Failure screenshot", str(path)))
         if item.config.pluginmanager.hasplugin("allure_pytest"):
             import allure

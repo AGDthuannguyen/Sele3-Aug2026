@@ -7,12 +7,29 @@ Only browser creation is mocked; pytest performs fixture setup and teardown.
 
 from unittest.mock import Mock
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from pylenium import Browser
+from pylenium.plugins.pytest_plugin import _reporting_request_timeout
 
 pytest_plugins = ["pytester"]
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_reporting_timeout_is_restored(fails):
+    config = SimpleNamespace(timeout=None)
+    driver = Mock()
+    driver.command_executor.client_config = config
+    try:
+        with _reporting_request_timeout(Browser(driver)):
+            assert config.timeout == 10
+            if fails:
+                raise RuntimeError("capture error")
+    except RuntimeError:
+        assert fails
+    assert config.timeout is None
 
 
 @pytest.mark.parametrize("scenario", ["pass", "test_failure", "page_failure", "navigation_failure"])
