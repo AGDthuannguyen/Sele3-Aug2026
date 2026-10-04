@@ -54,7 +54,7 @@ jobs:
           fi
       - name: Run tests
         run: >-
-          poetry run pytest -m "${{ matrix.marker }}" --browser=chrome --headless
+          poetry run pytest -m "${{ matrix.marker }}" --browser=chrome --headless --maxfail=1
           --junitxml=artifacts/junit.xml --alluredir=artifacts/allure-results
       - name: Preserve test evidence
         if: always()

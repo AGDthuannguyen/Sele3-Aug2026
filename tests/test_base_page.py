@@ -88,5 +88,3 @@ def test_screenshot_can_return_bytes_without_a_file():
     driver.get_screenshot_as_png.return_value = b"png"
     assert Page(driver).screenshot() == b"png"
     driver.get_screenshot_as_png.assert_called_once()
-
-
