@@ -242,7 +242,20 @@ are retained for 14 days. New runs cancel superseded runs for the same event/ref
 
 Browser tests require Chrome and network access to The Internet. Navigation
 timeouts fail CI; the workflow does not skip failures or retry the suite to hide
-them. Inspect the failed step and downloaded artifacts from the Actions run.
+them. CI allows 60 seconds for navigation to this public website: a measured
+successful cold load took 31 seconds, exceeding the framework's 30-second
+default. This uses `PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT`; action and assertion
+timeouts remain unchanged. For a comparable local run in PowerShell:
+
+```powershell
+$env:PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT = "60"
+poetry run pytest -m browser --headless --maxfail=1
+```
+
+Failure reporting and fixture cleanup temporarily bound WebDriver HTTP reads
+to 10 seconds, restoring the original transport setting afterward. HTTP retries
+can extend that duration; CI also bounds the entire test step to 10 minutes.
+Inspect the failed step and downloaded artifacts from the Actions run.
 Actual GitHub execution must be verified after pushing this workflow. Jenkins,
 parallel execution, cross-browser certification, and package publishing remain
 outside Batch 1.

@@ -53,9 +53,10 @@ jobs:
             git show --format= --check HEAD
           fi
       - name: Run tests
-        timeout-minutes: 5
+        timeout-minutes: 10
         env:
           PYTHONUNBUFFERED: '1'
+          PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT: '60'
         run: >-
           poetry run pytest -v -o faulthandler_timeout=60 -m "${{ matrix.marker }}" --browser=chrome --headless --maxfail=1
           --junitxml=artifacts/junit.xml --alluredir=artifacts/allure-results
