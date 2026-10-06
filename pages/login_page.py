@@ -8,17 +8,16 @@ class LoginPage(BasePage):
 
     def __init__(self, page: Page):
         super().__init__(page)
-        self.username = page.locator("#username")
-        self.password = page.locator("#password")
+        self._username = page.locator("#username")
+        self._password = page.locator("#password")
         # The site uses a native button without an explicit role attribute.
-        self.submit = page.locator("button[type='submit']")
-        self.message = page.locator("#flash")
+        self._submit = page.locator("button[type='submit']")
 
     def is_loaded(self) -> bool:
-        return self.username.is_visible()
+        return self._username.is_visible()
 
     def login(self, username: str, password: str) -> None:
         """Submit credentials; the caller decides which outcome to assert."""
-        self.username.fill(username)
-        self.password.fill(password)
-        self.submit.click()
+        self._username.fill(username)
+        self._password.fill(password)
+        self._submit.click()

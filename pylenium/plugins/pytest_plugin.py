@@ -35,8 +35,8 @@ def _reporting_request_timeout(session: Browser) -> Iterator[None]:
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("pylenium")
-    group.addoption("--browser", choices=("chrome", "firefox", "edge", "safari"), default=None,
-                    help="Override the configured browser")
+    group.addoption("--browser", default=None,
+                    help="Override the configured browser strategy name")
     group.addoption("--headless", action="store_true", default=False,
                     help="Run without a visible browser window")
     group.addoption("--headed", action="store_true", default=False,

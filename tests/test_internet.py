@@ -11,14 +11,18 @@ from pylenium import expect
 
 pytestmark = pytest.mark.browser
 
+# Public-site redirects can outlast the framework's short assertion default.
+LOGIN_RESPONSE_TIMEOUT = 60
+
 
 def test_login_form_locators_and_assertions(internet_page):
     login = LoginPage(internet_page).wait_until_loaded(timeout=5)
     assert internet_page.locator("//h2").text() == "Login Page"
     assert internet_page.get_by_text("Login Page").is_visible()
-    expect(login.username).to_be_visible()
-    expect(login.username).to_be_enabled()
-    expect(login.username).to_have_attribute("type", "text")
+    username = internet_page.locator("#username")
+    expect(username).to_be_visible()
+    expect(username).to_be_enabled()
+    expect(username).to_have_attribute("type", "text")
     expect(internet_page).to_have_title("The Internet")
     expect(internet_page).to_have_url("/login")
     expect(internet_page).not_.to_have_title("Wrong Title")
@@ -26,16 +30,18 @@ def test_login_form_locators_and_assertions(internet_page):
 
 
 def test_login_success(internet_page):
-    login = LoginPage(internet_page).open().wait_until_loaded(timeout=5)
+    login = LoginPage(internet_page).wait_until_loaded(timeout=5)
     login.login("tomsmith", "SuperSecretPassword!")
-    expect(internet_page).to_have_url("/secure")
-    expect(login.message).to_have_text("You logged into a secure area!")
+    expect(internet_page, timeout=LOGIN_RESPONSE_TIMEOUT).to_have_url("/secure")
+    expect(internet_page.locator("#flash")).to_have_text("You logged into a secure area!")
 
 
 def test_login_rejects_invalid_password(internet_page):
     login = LoginPage(internet_page).wait_until_loaded(timeout=5)
     login.login("tomsmith", "invalid-password")
-    expect(login.message).to_have_text("Your password is invalid!")
+    expect(internet_page.locator("#flash"), timeout=LOGIN_RESPONSE_TIMEOUT).to_have_text(
+        "Your password is invalid!"
+    )
     expect(internet_page).to_have_url("/login")
 
 

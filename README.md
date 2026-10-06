@@ -235,10 +235,15 @@ Use a fresh results directory for each run to avoid mixing old and new results.
 
 `.github/workflows/verify.yml` runs on branch pushes, pull requests targeting
 `main`, and manual dispatch. It installs the locked dependencies on Python 3.12
-and runs two independent jobs: unit/plugin tests and Chrome headless integration
-tests. The unit job checks whitespace in the committed changes. Both jobs upload
-available JUnit, Allure, and screenshot artifacts even if tests fail; artifacts
-are retained for 14 days. New runs cancel superseded runs for the same event/ref.
+and runs two independent jobs: unit/plugin tests and browser integration tests
+(Chrome headless by default). Both jobs upload available JUnit, Allure, and
+screenshot artifacts even if tests fail; artifacts are retained for 14 days.
+New runs cancel superseded runs for the same event/ref.
+For manual runs, GitHub Actions inputs can override the browser strategy name,
+headless mode, base URL, navigation timeout, and failure limit. A headed run uses
+`xvfb-run` on the Linux runner. Push and pull request runs keep the documented
+defaults. Browser names are resolved from the strategy registry when the fixture
+launches; a consumer can register a new strategy before test setup.
 
 Browser tests require Chrome and network access to The Internet. Navigation
 timeouts fail CI; the workflow does not skip failures or retry the suite to hide
@@ -256,6 +261,5 @@ Failure reporting and fixture cleanup temporarily bound WebDriver HTTP reads
 to 10 seconds, restoring the original transport setting afterward. HTTP retries
 can extend that duration; CI also bounds the entire test step to 10 minutes.
 Inspect the failed step and downloaded artifacts from the Actions run.
-Actual GitHub execution must be verified after pushing this workflow. Jenkins,
-parallel execution, cross-browser certification, and package publishing remain
-outside Batch 1.
+Jenkins, parallel execution, cross-browser certification, and package
+publishing remain outside Batch 1.

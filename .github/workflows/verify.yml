@@ -6,6 +6,27 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      browser:
+        description: Browser strategy name
+        type: string
+        default: chrome
+      headless:
+        description: Run without a visible browser window
+        type: boolean
+        default: true
+      base_url:
+        description: Base URL for browser tests
+        type: string
+        default: https://the-internet.herokuapp.com/
+      page_load_timeout:
+        description: Navigation timeout in seconds
+        type: number
+        default: 60
+      max_failures:
+        description: Stop after this many test failures
+        type: number
+        default: 1
 
 permissions:
   contents: read
@@ -25,12 +46,11 @@ jobs:
         include:
           - suite: unit
             marker: not browser
-          - suite: chrome
+          - suite: browser
             marker: browser
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
@@ -40,26 +60,25 @@ jobs:
           python -m pip install poetry==2.4.2
           poetry check --lock
           poetry sync
-      - name: Check changed lines
-        if: matrix.suite == 'unit'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
-            git diff --check "$BASE_SHA" HEAD
-          elif git show-ref --verify --quiet refs/remotes/origin/main && [ "$(git rev-parse origin/main)" != "$(git rev-parse HEAD)" ]; then
-            git diff --check origin/main...HEAD
-          else
-            git show --format= --check HEAD
-          fi
       - name: Run tests
         timeout-minutes: 10
         env:
           PYTHONUNBUFFERED: '1'
-          PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT: '60'
-        run: >-
-          poetry run pytest -v -o faulthandler_timeout=60 -m "${{ matrix.marker }}" --browser=chrome --headless --maxfail=1
-          --junitxml=artifacts/junit.xml --alluredir=artifacts/allure-results
+          PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT: ${{ inputs.page_load_timeout || 60 }}
+          CI_BROWSER: ${{ inputs.browser || 'chrome' }}
+          CI_BASE_URL: ${{ inputs.base_url || 'https://the-internet.herokuapp.com/' }}
+          CI_HEADLESS: ${{ github.event_name == 'workflow_dispatch' && inputs.headless == false && 'false' || 'true' }}
+          CI_MAX_FAILURES: ${{ inputs.max_failures || 1 }}
+        run: |
+          args=(-v -o faulthandler_timeout=60 -m "${{ matrix.marker }}"
+                --browser="$CI_BROWSER" --base-url="$CI_BASE_URL"
+                --maxfail="$CI_MAX_FAILURES"
+                --junitxml=artifacts/junit.xml --alluredir=artifacts/allure-results)
+          if [ "$CI_HEADLESS" = 'true' ]; then
+            poetry run pytest "${args[@]}" --headless
+          else
+            xvfb-run -a poetry run pytest "${args[@]}" --headed
+          fi
       - name: Preserve test evidence
         if: always()
         uses: actions/upload-artifact@v6

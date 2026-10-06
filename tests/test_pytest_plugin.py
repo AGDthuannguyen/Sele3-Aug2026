@@ -103,6 +103,41 @@ def launch(monkeypatch):
     pytester.runpytest_subprocess("-q", "--browser=firefox", "--base-url=https://example.org", *flags).assert_outcomes(passed=1)
 
 
+def test_external_browser_strategy_via_cli_and_fixture(pytester):
+    pytester.makeconftest('''
+from unittest.mock import Mock
+from pylenium.core.browser_strategy import BROWSER_STRATEGIES, ChromeStrategy
+
+created = []
+
+class ConsumerStrategy(ChromeStrategy):
+    def create_driver(self, options):
+        driver = Mock()
+        created.append(driver)
+        return driver
+
+BROWSER_STRATEGIES["consumer_browser"] = ConsumerStrategy
+
+def pytest_sessionfinish(session):
+    assert len(created) == 1
+    created[0].quit.assert_called_once_with()
+''')
+    pytester.makepyfile('''
+def test_consumer_browser(browser, page):
+    assert page._driver is browser._driver
+    page.goto("https://the-internet.herokuapp.com/login")
+    browser._driver.get.assert_called_once_with("https://the-internet.herokuapp.com/login")
+''')
+    pytester.runpytest_subprocess("-q", "--browser=consumer_browser").assert_outcomes(passed=1)
+
+
+def test_unknown_browser_is_validated_at_launch(pytester):
+    pytester.makepyfile("def test_browser(browser): pass")
+    result = pytester.runpytest_subprocess("-q", "--browser=not_registered")
+    result.assert_outcomes(errors=1)
+    result.stdout.fnmatch_lines(["*Unsupported browser type: 'not_registered'*"])
+
+
 def test_conflicting_cli_options_fail(pytester):
     pytester.makepyfile("def test_unused(): pass")
     result = pytester.runpytest_subprocess("--headless", "--headed")
