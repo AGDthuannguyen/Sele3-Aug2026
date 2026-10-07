@@ -4,10 +4,12 @@ Network failures remain failures, not skips. Injected elements below exercise
 browser edge cases that the site's built-in examples do not supply.
 """
 
+from pathlib import Path
+
 import pytest
 
 from pages.login_page import LoginPage
-from pylenium import expect
+from pylenium import DataReader, expect
 
 pytestmark = pytest.mark.browser
 
@@ -34,9 +36,14 @@ def test_page_object_opens_login_form(practice_page):
     expect(practice_page).to_have_url("/login")
 
 
-def test_login_rejects_unknown_account(practice_page):
+@pytest.mark.parametrize(
+    "case",
+    DataReader.read_json(Path(__file__).resolve().parents[1] / "data" / "invalid_login_cases.json"),
+    ids=lambda case: case["label"],
+)
+def test_login_rejects_unknown_account(practice_page, case):
     login = LoginPage(practice_page).wait_until_loaded(timeout=5)
-    login.login("pylenium-unknown@example.invalid", "invalid-password")
+    login.login(case["email"], case["password"])
     expect(practice_page.get_by_text("Your email or password is incorrect!"),
            timeout=LOGIN_RESPONSE_TIMEOUT).to_be_visible()
     expect(practice_page).to_have_url("/login")
