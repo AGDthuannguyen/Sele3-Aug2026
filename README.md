@@ -239,14 +239,17 @@ and runs two independent jobs: unit/plugin tests and browser integration tests
 (Chrome headless by default). Both jobs upload available JUnit, Allure, and
 screenshot artifacts even if tests fail; artifacts are retained for 14 days.
 New runs cancel superseded runs for the same event/ref.
-For manual runs, GitHub Actions inputs can override the browser strategy name,
-headless mode, base URL, navigation timeout, and failure limit. A headed run uses
-`xvfb-run` on the Linux runner. Push and pull request runs keep the documented
-defaults. Browser names are resolved from the strategy registry when the fixture
-launches; a consumer can register a new strategy before test setup.
+The browser job starts a local container of The Internet, then runs Chrome
+against it. This keeps the same application and scenarios while avoiding the
+public Heroku deployment's intermittent error pages. For manual runs, GitHub
+Actions inputs can override the browser strategy name, headless mode, base URL,
+navigation timeout, and failure limit. A headed run uses `xvfb-run` on the Linux
+runner. Push and pull request runs keep the documented defaults. Browser names
+are resolved from the strategy registry when the fixture launches; a consumer
+can register a new strategy before test setup.
 
-Browser tests require Chrome and network access to The Internet. Navigation
-timeouts fail CI; the workflow does not skip failures or retry the suite to hide
+Browser tests require Chrome; the CI job also requires Docker to start The
+Internet. Navigation timeouts fail CI; the workflow does not skip failures or retry the suite to hide
 them. CI allows 60 seconds for navigation to this public website: a measured
 successful cold load took 31 seconds, exceeding the framework's 30-second
 default. This uses `PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT`; action and assertion
