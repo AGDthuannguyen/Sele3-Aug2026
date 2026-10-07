@@ -1,7 +1,7 @@
-"""Phase 4 checks using The Internet's LoginPage and URLs.
+"""Phase 4 checks using Automation Exercise's LoginPage and URLs.
 
 WebDriver is mocked here to verify readiness failures and navigation arguments.
-Real website behavior is exercised in test_internet.py. These checks may be
+Real website behavior is exercised in test_browser_integration.py. These checks may be
 replaced or removed when they no longer serve a later phase's acceptance scope.
 """
 
@@ -15,7 +15,7 @@ from pages.login_page import LoginPage
 from pylenium import Page
 
 
-BASE_URL = "https://the-internet.herokuapp.com"
+BASE_URL = "https://www.automationexercise.com"
 
 
 def test_page_object_is_lazy_and_open_returns_self():
@@ -64,14 +64,14 @@ def test_empty_url_rejected_before_navigation():
 
 
 @pytest.mark.parametrize("url,expected", [
-    ("1", f"{BASE_URL}/dynamic_loading/1"),
+    ("1", f"{BASE_URL}/product_details/1"),
     ("/login", f"{BASE_URL}/login"),
-    (f"{BASE_URL}/checkboxes", f"{BASE_URL}/checkboxes"),
-    ("//the-internet.herokuapp.com/login", f"{BASE_URL}/login"),
+    (f"{BASE_URL}/products", f"{BASE_URL}/products"),
+    ("//www.automationexercise.com/login", f"{BASE_URL}/login"),
 ])
 def test_navigation_uses_standard_url_resolution(url, expected):
     driver = Mock()
-    Page(driver, base_url=f"{BASE_URL}/dynamic_loading/").goto(url)
+    Page(driver, base_url=f"{BASE_URL}/product_details/").goto(url)
     driver.get.assert_called_once_with(expected)
 
 

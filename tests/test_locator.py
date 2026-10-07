@@ -421,13 +421,13 @@ def test_text_waits_for_visibility_and_accepts_empty_result(fast_action_waits):
 
 
 @pytest.mark.browser
-def test_send_keys_preserves_content_and_cursor_on_the_internet(internet_page):
-    username = internet_page.locator("#username")
-    username.fill("old")
-    username.send_keys(Keys.END, " appended")
-    assert username.get_attribute("value") == "old appended"
-    username.send_keys(Keys.HOME, "prefix ")
-    assert username.get_attribute("value") == "prefix old appended"
+def test_send_keys_preserves_content_and_cursor_on_practice_site(practice_page):
+    email = practice_page.locator("[data-qa='login-email']")
+    email.fill("old")
+    email.send_keys(Keys.END, " appended")
+    assert email.get_attribute("value") == "old appended"
+    email.send_keys(Keys.HOME, "prefix ")
+    assert email.get_attribute("value") == "prefix old appended"
 
 
 def test_send_keys_retries_stale_command_with_fresh_parent(fast_action_waits):
@@ -564,8 +564,8 @@ def test_read_retries_stale_after_lookup(fast_action_waits, method):
 
 
 @pytest.mark.browser
-def test_click_recovers_from_fixed_footer_on_the_internet(internet_page):
-    driver = internet_page._driver
+def test_click_recovers_from_fixed_footer_on_practice_site(practice_page):
+    driver = practice_page._driver
     driver.execute_script("""
         const area = document.createElement('div');
         area.id = 'click-recovery-area';
@@ -585,7 +585,7 @@ def test_click_recovers_from_fixed_footer_on_the_internet(internet_page):
         window.scrollTo(0, window.scrollY + button.getBoundingClientRect().top - window.innerHeight + 50);
     """)
     try:
-        target = internet_page.locator("#click-recovery-target")
+        target = practice_page.locator("#click-recovery-target")
         with pytest.raises(ElementClickInterceptedException):
             driver.find_element("id", "click-recovery-target").click()
         target.click()

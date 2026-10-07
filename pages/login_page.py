@@ -1,4 +1,4 @@
-"""Login form on https://the-internet.herokuapp.com/login."""
+"""Login form on Automation Exercise."""
 
 from pylenium import BasePage, Page
 
@@ -8,16 +8,15 @@ class LoginPage(BasePage):
 
     def __init__(self, page: Page):
         super().__init__(page)
-        self._username = page.locator("#username")
-        self._password = page.locator("#password")
-        # The site uses a native button without an explicit role attribute.
-        self._submit = page.locator("button[type='submit']")
+        self._email = page.locator("[data-qa='login-email']")
+        self._password = page.locator("[data-qa='login-password']")
+        self._submit = page.locator("[data-qa='login-button']")
 
     def is_loaded(self) -> bool:
-        return self._username.is_visible()
+        return self._email.is_visible()
 
-    def login(self, username: str, password: str) -> None:
+    def login(self, email: str, password: str) -> None:
         """Submit credentials; the caller decides which outcome to assert."""
-        self._username.fill(username)
+        self._email.fill(email)
         self._password.fill(password)
         self._submit.click()

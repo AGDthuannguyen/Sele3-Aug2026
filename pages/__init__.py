@@ -1,1 +1,1 @@
-"""Page objects for The Internet example application."""
+"""Page objects for the Automation Exercise practice site."""

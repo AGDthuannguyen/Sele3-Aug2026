@@ -111,14 +111,14 @@ Sele3-Aug2026/
 ├── pyproject.toml          # Poetry configuration
 ├── config/                 # User environment configs
 ├── data/                   # Test data (JSON, CSV)
-├── pages/                  # The Internet page objects (LoginPage)
+├── pages/                  # Automation Exercise page objects (LoginPage)
 ├── pylenium/               # Framework Core
 │   ├── assertions/         # Smart assertions (expect)
 │   ├── config/             # Dynaconf settings
 │   ├── core/               # Browser, Page, Locator, Strategies
 │   ├── plugins/            # pytest browser/page fixtures and CLI options
 │   └── waits/              # AutoWait backed by Selenium WebDriverWait
-├── tests/                  # Core unit tests and The Internet browser tests
+├── tests/                  # Core unit tests and public-site browser tests
 └── .gitignore
 ```
 
@@ -140,9 +140,9 @@ The framework comes with a suite of tests to verify its core functionality (Brow
 poetry run pytest tests/ --headless -v
 ```
 
-The Internet (https://the-internet.herokuapp.com/) is the browser test target
-for phase 4 and subsequent phases. Browser tests require network access and a
-working site; an outage is reported as a failure, not silently skipped.
+Automation Exercise (https://www.automationexercise.com/) is the public browser
+test target. Browser tests require network access and a working site; an outage
+is reported as a failure, not silently skipped.
 
 ```bash
 poetry run pytest -m "not browser" -q  # Core and plugin tests, no website needed
@@ -151,14 +151,14 @@ poetry run pytest -m browser --headless -q  # Live website integration tests
 
 `tests/test_locator.py` and `tests/test_assertions.py` retain useful core regression
 tests from phase 3. Browser scenarios use the `browser` marker in
-`tests/test_internet.py` and `tests/test_locator.py`; obsolete
+`tests/test_browser_integration.py` and `tests/test_locator.py`; obsolete
 local HTML tests have been replaced. A few browser edge cases inject temporary
 elements into the current page to test quoting, readonly and contenteditable.
 
 Tests serve acceptance of the current phase, not a permanent suite requirement.
 Later phases may replace or remove checks that no longer serve their scope.
-BasePage unit checks reuse The Internet's LoginPage and URLs with a mock driver;
-they do not contact another website.
+BasePage unit checks reuse Automation Exercise's LoginPage and URLs with a mock
+driver; they do not contact another website.
 
 ## Phase 4: Page Objects and pytest
 
@@ -171,16 +171,15 @@ from pages.login_page import LoginPage
 from pylenium import expect
 
 
-def test_login(internet_page):
-    login = LoginPage(internet_page).wait_until_loaded(timeout=5)
-    login.login("tomsmith", "SuperSecretPassword!")
-    expect(internet_page).to_have_url("/secure")
+def test_login_form(practice_page):
+    LoginPage(practice_page).wait_until_loaded(timeout=5)
+    expect(practice_page.locator("[data-qa='login-email']")).to_be_visible()
 ```
 
-Run against The Internet, or pass --base-url for a compatible deployment:
+Run against Automation Exercise, or pass `--base-url` for a compatible deployment:
 
 ```bash
-poetry run pytest -m browser --browser=chrome --headless --base-url=https://the-internet.herokuapp.com/
+poetry run pytest -m browser --browser=chrome --headless --base-url=https://www.automationexercise.com/
 ```
 
 - `browser` and `page` are function-scoped. Each requesting test gets a new
@@ -200,7 +199,7 @@ poetry run pytest -m browser --browser=chrome --headless --base-url=https://the-
   actions or assertions inside it. `wait_until_loaded(timeout=...)` owns one
   readiness wait. `open()` only navigates using WebDriver's page-load timeout;
   it does not silently add a readiness wait. Chain the two explicitly when needed.
-- `tests/conftest.py` defines `internet_page`: it uses the plugin's browser fixture,
+- `tests/conftest.py` defines `practice_page`: it uses the plugin's browser fixture,
   applies the site's base URL and opens `/login`. The plugin's generic `page`
   fixture remains unchanged for other applications. pytest discovers conftest
   automatically; tests do not import it.
@@ -239,21 +238,19 @@ and runs two independent jobs: unit/plugin tests and browser integration tests
 (Chrome headless by default). Both jobs upload available JUnit, Allure, and
 screenshot artifacts even if tests fail; artifacts are retained for 14 days.
 New runs cancel superseded runs for the same event/ref.
-The browser job starts a local container of The Internet, then runs Chrome
-against it. This keeps the same application and scenarios while avoiding the
-public Heroku deployment's intermittent error pages. For manual runs, GitHub
-Actions inputs can override the browser strategy name, headless mode, base URL,
-navigation timeout, and failure limit. A headed run uses `xvfb-run` on the Linux
-runner. Push and pull request runs keep the documented defaults. Browser names
-are resolved from the strategy registry when the fixture launches; a consumer
-can register a new strategy before test setup.
+The browser job opens the public Automation Exercise site. A failure of that
+site remains a CI failure with the available screenshot and test results. For
+manual runs, GitHub Actions inputs can override the browser strategy name,
+headless mode, base URL, navigation timeout, and failure limit. Push and pull
+request runs use headless mode; a manual headed run uses `xvfb-run` on the Linux
+runner. Browser names are resolved from the strategy registry when the fixture
+launches; a consumer can register a new strategy before test setup.
 
-Browser tests require Chrome; the CI job also requires Docker to start The
-Internet. Navigation timeouts fail CI; the workflow does not skip failures or retry the suite to hide
-them. CI allows 60 seconds for navigation to this public website: a measured
-successful cold load took 31 seconds, exceeding the framework's 30-second
-default. This uses `PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT`; action and assertion
-timeouts remain unchanged. For a comparable local run in PowerShell:
+Browser tests require Chrome and access to the public practice site. Navigation
+timeouts fail CI; the workflow does not skip failures or retry the suite to hide
+them. CI allows 60 seconds for navigation through
+`PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT`; action and assertion timeouts remain
+unchanged. For a comparable local run in PowerShell:
 
 ```powershell
 $env:PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT = "60"

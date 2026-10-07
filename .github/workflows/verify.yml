@@ -16,9 +16,9 @@ on:
         type: boolean
         default: true
       base_url:
-        description: Base URL for browser tests (default is the local The Internet service)
+        description: Base URL for the public browser test site
         type: string
-        default: http://127.0.0.1:7080/
+        default: https://www.automationexercise.com/
       page_load_timeout:
         description: Navigation timeout in seconds
         type: number
@@ -60,26 +60,14 @@ jobs:
           python -m pip install poetry==2.4.2
           poetry check --lock
           poetry sync
-      - name: Start The Internet for browser tests
-        if: matrix.suite == 'browser'
-        run: |
-          docker run --detach --rm --name the-internet --publish 127.0.0.1:7080:5000 gprestes/the-internet@sha256:205b8fc712747ea5fa1a0d54b01fa02d65e3f67a448c7a5c2aba65b211def171
-          for attempt in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:7080/login | grep --quiet 'id="username"'; then
-              exit 0
-            fi
-            sleep 1
-          done
-          docker logs the-internet
-          exit 1
       - name: Run tests
         timeout-minutes: 10
         env:
           PYTHONUNBUFFERED: '1'
           PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT: ${{ inputs.page_load_timeout || 60 }}
           CI_BROWSER: ${{ inputs.browser || 'chrome' }}
-          CI_BASE_URL: ${{ inputs.base_url || 'http://127.0.0.1:7080/' }}
-          CI_HEADLESS: ${{ github.event_name == 'workflow_dispatch' && inputs.headless == false && 'false' || 'true' }}
+          CI_BASE_URL: ${{ inputs.base_url || 'https://www.automationexercise.com/' }}
+          CI_HEADLESS: ${{ github.event_name != 'workflow_dispatch' || inputs.headless }}
           CI_MAX_FAILURES: ${{ inputs.max_failures || 1 }}
         run: |
           args=(-v -o faulthandler_timeout=60 -m "${{ matrix.marker }}"

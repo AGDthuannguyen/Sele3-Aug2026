@@ -125,8 +125,8 @@ def pytest_sessionfinish(session):
     pytester.makepyfile('''
 def test_consumer_browser(browser, page):
     assert page._driver is browser._driver
-    page.goto("https://the-internet.herokuapp.com/login")
-    browser._driver.get.assert_called_once_with("https://the-internet.herokuapp.com/login")
+    page.goto("https://www.automationexercise.com/login")
+    browser._driver.get.assert_called_once_with("https://www.automationexercise.com/login")
 ''')
     pytester.runpytest_subprocess("-q", "--browser=consumer_browser").assert_outcomes(passed=1)
 
