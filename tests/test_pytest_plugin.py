@@ -8,6 +8,7 @@ Only browser creation is mocked; pytest performs fixture setup and teardown.
 from unittest.mock import Mock
 import json
 from types import SimpleNamespace
+from xml.etree import ElementTree
 
 import pytest
 
@@ -238,3 +239,55 @@ def prepared(page):
         assert (pytester.path / "results" / pngs[0]["source"]).read_bytes() == b"test-png"
     if scenario in ("closed", "capture_error", "attachment_error"):
         result.stdout.fnmatch_lines(["*Failure screenshot unavailable:*"])
+
+
+def test_parallel_failures_keep_sessions_and_artifacts_separate(pytester):
+    pytester.makeconftest("""
+from pathlib import Path
+from unittest.mock import Mock
+
+import pytest
+
+from pylenium import Browser
+
+
+@pytest.fixture(autouse=True)
+def fake_browser(monkeypatch, request, worker_id):
+    driver = Mock()
+    driver.get_screenshot_as_png.return_value = request.node.name.encode()
+    def close():
+        Path("closed").mkdir(exist_ok=True)
+        (Path("closed") / request.node.name).write_text(worker_id)
+    driver.quit.side_effect = close
+    monkeypatch.setattr(Browser, "launch", Mock(return_value=Browser(driver)))
+    yield
+    driver.quit.assert_called_once_with()
+""")
+    pytester.makepyfile("""
+import pytest
+
+
+@pytest.mark.parametrize("case", range(4))
+def test_failure(browser, case):
+    assert False, f"failure {case}"
+""")
+    result = pytester.runpytest_subprocess(
+        "-q", "-n", "2", "--screenshots-dir=shots",
+        "--alluredir=results", "--junitxml=result.xml",
+    )
+    result.assert_outcomes(failed=4)
+    assert result.ret == 1
+
+    closed = list((pytester.path / "closed").iterdir())
+    assert len(closed) == 4
+    assert {path.read_text() for path in closed} == {"gw0", "gw1"}
+    screenshots = list((pytester.path / "shots").glob("*.png"))
+    assert len(screenshots) == 4
+    assert {path.read_bytes() for path in screenshots} == {
+        f"test_failure[{case}]".encode() for case in range(4)
+    }
+    records = [json.loads(path.read_text()) for path in (pytester.path / "results").glob("*-result.json")]
+    assert len(records) == 4
+    assert all(any(item["type"] == "image/png" for item in record.get("attachments", []))
+               for record in records)
+    assert len(list(ElementTree.parse(pytester.path / "result.xml").iter("failure"))) == 4

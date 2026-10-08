@@ -109,6 +109,7 @@ expect(page).to_have_url("dashboard")
 Sele3-Aug2026/
 ├── poetry.lock             # Dependency lockfile
 ├── pyproject.toml          # Poetry configuration
+├── Jenkinsfile             # Parallel unit/browser verification on Jenkins
 ├── config/                 # User environment configs
 ├── data/                   # Test data (JSON, CSV)
 ├── pages/                  # Automation Exercise page objects (LoginPage)
@@ -122,6 +123,8 @@ Sele3-Aug2026/
 ├── tests/                  # Core unit tests and public-site browser tests
 └── .gitignore
 ```
+
+See [implemented relationships](diagram/relationships_map.md) and [test lifecycle](diagram/lifecycle.md).
 
 ## Getting Started
 
@@ -263,7 +266,7 @@ Failure reporting and fixture cleanup temporarily bound WebDriver HTTP reads
 to 10 seconds, restoring the original transport setting afterward. HTTP retries
 can extend that duration; CI also bounds the entire test step to 10 minutes.
 Inspect the failed step and downloaded artifacts from the Actions run.
-Jenkins, parallel execution, and package publishing are planned for later work.
+Jenkins and parallel execution are covered below. Package publishing is outside the current scope.
 
 ## Batch 2: Cross-browser runs and test data
 
@@ -292,3 +295,36 @@ rows = DataReader.read_csv("data/users.csv")
 
 CSV files need a header row; values are strings. The parameterized login test in
 `tests/test_browser_integration.py` shows how to pass JSON cases to pytest.
+
+## Batch 3: Parallel execution and Jenkins
+
+pytest-xdist runs tests in separate worker processes. The function-scoped browser
+fixture launches and closes a WebDriver session for every test, including tests
+on different workers. Failure screenshot filenames use UUIDs; Allure writes
+separate result files and pytest combines worker results into one JUnit report.
+
+```bash
+poetry run pytest -m "not browser" -n 2 -q
+poetry run pytest -m browser --browser=chrome --headless -n 2 --maxfail=1
+```
+
+Each browser worker opens its own session and visits the public practice site.
+Keep the worker count within the machine's browser and memory capacity. Browser
+failures remain failures; parallel execution does not retry or skip them.
+
+`Jenkinsfile` runs on a Windows agent labeled `windows` with Python 3.12,
+Poetry 2.4.2, and the selected browser installed. Windows is intentional:
+the pipeline uses Windows PowerShell and can run Edge. It checks out a fresh
+workspace, installs locked dependencies, runs unit/plugin and public-site browser
+tests with two workers, then publishes JUnit results and archives available
+Allure data and screenshots even after a test failure. The checkout stage cleans
+the workspace once, so workers do not clean shared Allure directories.
+Create a Pipeline or Multibranch Pipeline job using the repository's
+`Jenkinsfile`. The `BROWSER`
+parameter selects Chrome, Firefox, or Edge; `BASE_URL` overrides the public
+target for a compatible deployment; `PAGE_LOAD_TIMEOUT` sets the navigation
+timeout (60 seconds by default). The pipeline uses headless mode.
+
+Safari remains a manual macOS workflow option in GitHub Actions. A Safari run
+and an actual Jenkins run require the corresponding infrastructure; local test
+results alone do not certify either environment.
