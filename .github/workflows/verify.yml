@@ -1,0 +1,89 @@
+name: Verify
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      browser:
+        description: Browser strategy name
+        type: string
+        default: chrome
+      headless:
+        description: Run without a visible browser window
+        type: boolean
+        default: true
+      base_url:
+        description: Base URL for the public browser test site
+        type: string
+        default: https://www.automationexercise.com/
+      page_load_timeout:
+        description: Navigation timeout in seconds
+        type: number
+        default: 60
+      max_failures:
+        description: Stop after this many test failures
+        type: number
+        default: 1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: ${{ matrix.suite }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: unit
+            marker: not browser
+          - suite: browser
+            marker: browser
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        run: |
+          python -m pip install poetry==2.4.2
+          poetry check --lock
+          poetry sync
+      - name: Run tests
+        timeout-minutes: 10
+        env:
+          PYTHONUNBUFFERED: '1'
+          PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT: ${{ inputs.page_load_timeout || 60 }}
+          CI_BROWSER: ${{ inputs.browser || 'chrome' }}
+          CI_BASE_URL: ${{ inputs.base_url || 'https://www.automationexercise.com/' }}
+          CI_HEADLESS: ${{ github.event_name != 'workflow_dispatch' || inputs.headless }}
+          CI_MAX_FAILURES: ${{ inputs.max_failures || 1 }}
+        run: |
+          args=(-v -o faulthandler_timeout=60 -m "${{ matrix.marker }}"
+                --browser="$CI_BROWSER" --base-url="$CI_BASE_URL"
+                --maxfail="$CI_MAX_FAILURES"
+                --junitxml=artifacts/junit.xml --alluredir=artifacts/allure-results)
+          if [ "$CI_HEADLESS" = 'true' ]; then
+            poetry run pytest "${args[@]}" --headless
+          else
+            xvfb-run -a poetry run pytest "${args[@]}" --headed
+          fi
+      - name: Preserve test evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.suite }}-results
+          path: artifacts/
+          retention-days: 14
+          if-no-files-found: warn

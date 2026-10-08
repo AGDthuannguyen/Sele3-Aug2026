@@ -17,6 +17,14 @@ dependencies = [
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
+[project.entry-points.pytest11]
+pylenium = "pylenium.plugins.pytest_plugin"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["browser: live browser tests against The Internet (network required)"]
+pythonpath = ["."]
+
 [dependency-groups]
 dev = [
     "pytest (>=9.1.1,<10.0.0)",

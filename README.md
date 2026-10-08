@@ -18,7 +18,7 @@ Locators in Pylenium are **lazy** and **auto-wait** by default. They do not quer
 ```python
 from pylenium import Browser
 
-# Launch session and get the new page
+# Launch a session and wrap its current window
 browser = Browser.launch(headless=True)
 try:
     page = browser.new_page()
@@ -111,14 +111,14 @@ Sele3-Aug2026/
 ├── pyproject.toml          # Poetry configuration
 ├── config/                 # User environment configs
 ├── data/                   # Test data (JSON, CSV)
-├── pages/                  # Page Object Model (POM) classes
+├── pages/                  # Automation Exercise page objects (LoginPage)
 ├── pylenium/               # Framework Core
 │   ├── assertions/         # Smart assertions (expect)
 │   ├── config/             # Dynaconf settings
 │   ├── core/               # Browser, Page, Locator, Strategies
+│   ├── plugins/            # pytest browser/page fixtures and CLI options
 │   └── waits/              # AutoWait backed by Selenium WebDriverWait
-├── tests/                  # User tests
-│   └── html/               # Local test resources
+├── tests/                  # Core unit tests and public-site browser tests
 └── .gitignore
 ```
 
@@ -137,9 +137,129 @@ poetry install
 ### Running Tests
 The framework comes with a suite of tests to verify its core functionality (Browser, Locators, Assertions):
 ```bash
-poetry run pytest tests/ -v
+poetry run pytest tests/ --headless -v
 ```
 
-The new send_keys browser check uses https://the-internet.herokuapp.com/login
-and requires network access. Existing phase 3 local fixtures remain unchanged;
-phase 4's fixture/plugin infrastructure is not required.
+Automation Exercise (https://www.automationexercise.com/) is the public browser
+test target. Browser tests require network access and a working site; an outage
+is reported as a failure, not silently skipped.
+
+```bash
+poetry run pytest -m "not browser" -q  # Core and plugin tests, no website needed
+poetry run pytest -m browser --headless -q  # Live website integration tests
+```
+
+`tests/test_locator.py` and `tests/test_assertions.py` retain useful core regression
+tests from phase 3. Browser scenarios use the `browser` marker in
+`tests/test_browser_integration.py` and `tests/test_locator.py`; obsolete
+local HTML tests have been replaced. A few browser edge cases inject temporary
+elements into the current page to test quoting, readonly and contenteditable.
+
+Tests serve acceptance of the current phase, not a permanent suite requirement.
+Later phases may replace or remove checks that no longer serve their scope.
+BasePage unit checks reuse Automation Exercise's LoginPage and URLs with a mock
+driver; they do not contact another website.
+
+## Phase 4: Page Objects and pytest
+
+After `poetry install`, pytest discovers the Pylenium plugin automatically through
+its `pytest11` entry point. No manual plugin registration is needed. Tests that
+request neither `browser` nor `page` do not launch a browser.
+
+```python
+from pages.login_page import LoginPage
+from pylenium import expect
+
+
+def test_login_form(practice_page):
+    LoginPage(practice_page).wait_until_loaded(timeout=5)
+    expect(practice_page.locator("[data-qa='login-email']")).to_be_visible()
+```
+
+Run against Automation Exercise, or pass `--base-url` for a compatible deployment:
+
+```bash
+poetry run pytest -m browser --browser=chrome --headless --base-url=https://www.automationexercise.com/
+```
+
+- `browser` and `page` are function-scoped. Each requesting test gets a new
+  WebDriver session, closed in browser teardown even if page setup or the test fails.
+- `Browser.new_page()` wraps the current window; it creates neither a tab nor a
+  new session. The browser fixture owns cleanup. Tests normally should not call
+  `page.close()` or `browser.close()` themselves.
+- CLI values override configuration without mutating global settings. Omitting
+  `--browser`, `--headless`/`--headed`, or `--base-url` retains configured values.
+  The two display flags cannot be combined. Cross-browser certification belongs
+  to a later phase; these tests verify Chrome.
+- Relative navigation uses `urljoin`: with base `https://host/app/`, `child`
+  becomes `/app/child`, while `/child` starts at the host root. Absolute URLs,
+  including local `file:` URLs, remain unchanged. This corrects the previous
+  string-concatenation behavior for leading slashes.
+- `is_loaded()` must be an immediate boolean check. Do not call waiting locator
+  actions or assertions inside it. `wait_until_loaded(timeout=...)` owns one
+  readiness wait. `open()` only navigates using WebDriver's page-load timeout;
+  it does not silently add a readiness wait. Chain the two explicitly when needed.
+- `tests/conftest.py` defines `practice_page`: it uses the plugin's browser fixture,
+  applies the site's base URL and opens `/login`. The plugin's generic `page`
+  fixture remains unchanged for other applications. pytest discovers conftest
+  automatically; tests do not import it.
+- The multiline strings in `test_pytest_plugin.py` are executable subprocess
+  test modules created by pytester, not commented-out code. These checks exercise
+  real fixture teardown while mocking browser creation.
+
+Browser creation is cleaned up if post-launch configuration fails. A cleanup
+failure is chained to the original setup exception.
+
+## Batch 1: Failure reporting and GitHub Actions
+
+The pytest plugin captures one PNG when setup or the test body fails and its
+browser fixture has a session. Capture happens before browser teardown, including
+when a dependent page fixture fails. It never launches a browser for reporting.
+Tests that close their session early may have no screenshot. Teardown failures
+do not trigger screenshots because the session may already be closed.
+
+Screenshots are saved under `artifacts/screenshots` (override with
+`--screenshots-dir`) and attached through `allure-pytest` when that plugin is
+installed. Capture or attachment errors are diagnostic messages; they do not
+replace the test failure or prevent cleanup. Set
+`PYLENIUM_REPORTING__SCREENSHOT_ON_FAILURE=false` to disable capture.
+
+```bash
+poetry run pytest --headless --junitxml=artifacts/junit.xml --alluredir=artifacts/allure-results
+```
+
+Allure results are raw data, not an HTML report. With the Allure command-line tool
+installed separately, run `allure serve artifacts/allure-results` to view them.
+Use a fresh results directory for each run to avoid mixing old and new results.
+
+`.github/workflows/verify.yml` runs on branch pushes, pull requests targeting
+`main`, and manual dispatch. It installs the locked dependencies on Python 3.12
+and runs two independent jobs: unit/plugin tests and browser integration tests
+(Chrome headless by default). Both jobs upload available JUnit, Allure, and
+screenshot artifacts even if tests fail; artifacts are retained for 14 days.
+New runs cancel superseded runs for the same event/ref.
+The browser job opens the public Automation Exercise site. A failure of that
+site remains a CI failure with the available screenshot and test results. For
+manual runs, GitHub Actions inputs can override the browser strategy name,
+headless mode, base URL, navigation timeout, and failure limit. Push and pull
+request runs use headless mode; a manual headed run uses `xvfb-run` on the Linux
+runner. Browser names are resolved from the strategy registry when the fixture
+launches; a consumer can register a new strategy before test setup.
+
+Browser tests require Chrome and access to the public practice site. Navigation
+timeouts fail CI; the workflow does not skip failures or retry the suite to hide
+them. CI allows 60 seconds for navigation through
+`PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT`; action and assertion timeouts remain
+unchanged. For a comparable local run in PowerShell:
+
+```powershell
+$env:PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT = "60"
+poetry run pytest -m browser --headless --maxfail=1
+```
+
+Failure reporting and fixture cleanup temporarily bound WebDriver HTTP reads
+to 10 seconds, restoring the original transport setting afterward. HTTP retries
+can extend that duration; CI also bounds the entire test step to 10 minutes.
+Inspect the failed step and downloaded artifacts from the Actions run.
+Jenkins, parallel execution, cross-browser certification, and package
+publishing remain outside Batch 1.

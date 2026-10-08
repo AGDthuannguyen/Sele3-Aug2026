@@ -22,3 +22,4 @@ htmlcov/
 # Reports (Allure)
 allure-results/
 allure-report/
+artifacts/

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from urllib.parse import urljoin, urlsplit
+
 from selenium.webdriver.remote.webdriver import WebDriver
 
 from pylenium.config.config import settings
@@ -26,19 +29,22 @@ def _xpath_literal(text: str) -> str:
 class Page:
     """Simplified Playwright-like interface wrapping Selenium WebDriver."""
 
-    def __init__(self, driver: WebDriver):
+    def __init__(self, driver: WebDriver, *, base_url: str | None = None):
         self._driver = driver
+        self._base_url = base_url
 
     def goto(self, url: str) -> None:
         """Navigate to the given URL.
 
-        If the URL does not start with 'http', it will be prepended
-        with the base_url from configuration.
+        Resolve relative URLs with urllib.parse.urljoin. Absolute URLs,
+        including file: and data:, are passed unchanged.
         """
-        if not url.startswith("http"):
-            base_url = settings.get("browser.base_url", "")
+        if not urlsplit(url).scheme:
+            base_url = self._base_url
+            if base_url is None:
+                base_url = settings.get("browser.base_url", "")
             if base_url:
-                url = base_url.rstrip("/") + "/" + url.lstrip("/")
+                url = urljoin(base_url.rstrip("/") + "/", url)
         self._driver.get(url)
 
     def title(self) -> str:
@@ -104,15 +110,13 @@ class Page:
 
     # -- Page actions --
 
-    def screenshot(self, path: str) -> bytes:
-        """Take a screenshot and save it to the specified path.
-
-        Returns:
-            The screenshot data as bytes.
-        """
-        self._driver.save_screenshot(path)
-        return self._driver.get_screenshot_as_png()
+    def screenshot(self, path: str | None = None) -> bytes:
+        """Capture once, optionally save the same PNG bytes, and return them."""
+        image = self._driver.get_screenshot_as_png()
+        if path is not None:
+            Path(path).write_bytes(image)
+        return image
 
     def close(self) -> None:
-        """Close the page and its underlying driver."""
+        """Close the current window; closing the last window ends the session."""
         self._driver.close()
