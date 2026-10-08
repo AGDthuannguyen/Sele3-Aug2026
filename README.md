@@ -117,6 +117,7 @@ Sele3-Aug2026/
 │   ├── config/             # Dynaconf settings
 │   ├── core/               # Browser, Page, Locator, Strategies
 │   ├── plugins/            # pytest browser/page fixtures and CLI options
+│   ├── utils/              # JSON and CSV test-data reader
 │   └── waits/              # AutoWait backed by Selenium WebDriverWait
 ├── tests/                  # Core unit tests and public-site browser tests
 └── .gitignore
@@ -189,8 +190,7 @@ poetry run pytest -m browser --browser=chrome --headless --base-url=https://www.
   `page.close()` or `browser.close()` themselves.
 - CLI values override configuration without mutating global settings. Omitting
   `--browser`, `--headless`/`--headed`, or `--base-url` retains configured values.
-  The two display flags cannot be combined. Cross-browser certification belongs
-  to a later phase; these tests verify Chrome.
+  The two display flags cannot be combined.
 - Relative navigation uses `urljoin`: with base `https://host/app/`, `child`
   becomes `/app/child`, while `/child` starts at the host root. Absolute URLs,
   including local `file:` URLs, remain unchanged. This corrects the previous
@@ -234,9 +234,11 @@ Use a fresh results directory for each run to avoid mixing old and new results.
 
 `.github/workflows/verify.yml` runs on branch pushes, pull requests targeting
 `main`, and manual dispatch. It installs the locked dependencies on Python 3.12
-and runs two independent jobs: unit/plugin tests and browser integration tests
-(Chrome headless by default). Both jobs upload available JUnit, Allure, and
-screenshot artifacts even if tests fail; artifacts are retained for 14 days.
+and runs two independent jobs: unit/plugin tests on Linux and browser integration
+tests on Windows
+(Chrome, Firefox, and Edge headless on pushes and PRs). Both jobs upload
+available JUnit, Allure, and screenshot artifacts even if tests fail; artifacts
+are retained for 14 days.
 New runs cancel superseded runs for the same event/ref.
 The browser job opens the public Automation Exercise site. A failure of that
 site remains a CI failure with the available screenshot and test results. For
@@ -246,9 +248,9 @@ request runs use headless mode; a manual headed run uses `xvfb-run` on the Linux
 runner. Browser names are resolved from the strategy registry when the fixture
 launches; a consumer can register a new strategy before test setup.
 
-Browser tests require Chrome and access to the public practice site. Navigation
-timeouts fail CI; the workflow does not skip failures or retry the suite to hide
-them. CI allows 60 seconds for navigation through
+Browser tests require the selected browser and access to the public practice
+site. Navigation timeouts fail CI; the workflow does not skip failures or retry
+the suite to hide them. CI allows 60 seconds for navigation through
 `PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT`; action and assertion timeouts remain
 unchanged. For a comparable local run in PowerShell:
 
@@ -261,5 +263,32 @@ Failure reporting and fixture cleanup temporarily bound WebDriver HTTP reads
 to 10 seconds, restoring the original transport setting afterward. HTTP retries
 can extend that duration; CI also bounds the entire test step to 10 minutes.
 Inspect the failed step and downloaded artifacts from the Actions run.
-Jenkins, parallel execution, cross-browser certification, and package
-publishing remain outside Batch 1.
+Jenkins, parallel execution, and package publishing are planned for later work.
+
+## Batch 2: Cross-browser runs and test data
+
+The same `browser` tests run on Chrome, Firefox, and Edge in CI. A manual workflow
+dispatch runs only the browser named by its `browser` input. Locally, select one
+with `--browser=firefox` or `--browser=edge`. Safari is available through
+`--browser=safari` on macOS after enabling Safari's remote automation, but it
+does not support headless mode; use `--headed`. Safari is not included in the
+default CI run. To exercise Safari through a manual workflow dispatch,
+choose `browser=safari` and `headless=false`; that run uses a macOS runner.
+
+`DataReader` loads UTF-8 JSON or CSV files using Python's standard library. It
+returns parsed JSON values or CSV rows as dictionaries, and leaves file and
+parse errors unchanged:
+
+```python
+from pathlib import Path
+
+from pylenium import DataReader
+
+cases = DataReader.read_json(
+    Path(__file__).resolve().parents[1] / "data" / "invalid_login_cases.json"
+)
+rows = DataReader.read_csv("data/users.csv")
+```
+
+CSV files need a header row; values are strings. The parameterized login test in
+`tests/test_browser_integration.py` shows how to pass JSON cases to pytest.

@@ -86,8 +86,7 @@ class SafariStrategy(BrowserStrategy):
         return webdriver.Safari()
 
     def apply_headless(self, options: ArgOptions | None) -> None:
-        # Safari does not support headless mode
-        pass
+        raise ValueError("Safari does not support headless mode")
 
 
 # Registry mapping browser type names to their strategy classes

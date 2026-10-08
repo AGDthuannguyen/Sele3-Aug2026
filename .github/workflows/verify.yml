@@ -38,7 +38,7 @@ concurrency:
 jobs:
   tests:
     name: ${{ matrix.suite }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.suite == 'unit' && 'ubuntu-latest' || inputs.browser == 'safari' && 'macos-15' || 'windows-latest' }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -60,25 +60,51 @@ jobs:
           python -m pip install poetry==2.4.2
           poetry check --lock
           poetry sync
+      - name: Enable Safari automation
+        if: ${{ matrix.suite == 'browser' && inputs.browser == 'safari' }}
+        run: sudo safaridriver --enable
       - name: Run tests
         timeout-minutes: 10
+        shell: bash
         env:
           PYTHONUNBUFFERED: '1'
           PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT: ${{ inputs.page_load_timeout || 60 }}
           CI_BROWSER: ${{ inputs.browser || 'chrome' }}
+          CI_SUITE: ${{ matrix.suite }}
           CI_BASE_URL: ${{ inputs.base_url || 'https://www.automationexercise.com/' }}
           CI_HEADLESS: ${{ github.event_name != 'workflow_dispatch' || inputs.headless }}
           CI_MAX_FAILURES: ${{ inputs.max_failures || 1 }}
         run: |
-          args=(-v -o faulthandler_timeout=60 -m "${{ matrix.marker }}"
-                --browser="$CI_BROWSER" --base-url="$CI_BASE_URL"
-                --maxfail="$CI_MAX_FAILURES"
-                --junitxml=artifacts/junit.xml --alluredir=artifacts/allure-results)
-          if [ "$CI_HEADLESS" = 'true' ]; then
-            poetry run pytest "${args[@]}" --headless
+          if [ "$CI_SUITE" = browser ] && [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; then
+            browsers=(chrome firefox edge)
           else
-            xvfb-run -a poetry run pytest "${args[@]}" --headed
+            browsers=("$CI_BROWSER")
           fi
+
+          result=0
+          for browser in "${browsers[@]}"; do
+            browser_result=0
+            args=(-v -o faulthandler_timeout=60 -m "${{ matrix.marker }}"
+                  --browser="$browser" --base-url="$CI_BASE_URL"
+                  --maxfail="$CI_MAX_FAILURES"
+                  --junitxml="artifacts/junit-$browser.xml"
+                  --alluredir="artifacts/allure-results-$browser")
+            echo "::group::${CI_SUITE}: ${browser}"
+            if [ "$CI_HEADLESS" = true ]; then
+              poetry run pytest "${args[@]}" --headless || browser_result=$?
+            elif [ "$RUNNER_OS" = Linux ]; then
+              xvfb-run -a poetry run pytest "${args[@]}" --headed || browser_result=$?
+            else
+              poetry run pytest "${args[@]}" --headed || browser_result=$?
+            fi
+            echo "::endgroup::"
+            if [ "$browser_result" -ne 0 ]; then
+              diagnostic=$(python -c 'import sys, xml.etree.ElementTree as ET; root = ET.parse(sys.argv[1]).getroot(); issue = next((item for item in root.iter() if item.tag in ("error", "failure")), None); message = issue.get("message", "") if issue is not None else "pytest failed"; print((message.splitlines() or ["pytest failed"])[0])' "artifacts/junit-$browser.xml") || diagnostic="JUnit result unavailable"
+              echo "::error title=${CI_SUITE} ${browser} failed::${diagnostic}"
+              result=1
+            fi
+          done
+          exit "$result"
       - name: Preserve test evidence
         if: always()
         uses: actions/upload-artifact@v6

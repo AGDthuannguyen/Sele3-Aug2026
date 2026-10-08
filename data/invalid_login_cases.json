@@ -1,0 +1,12 @@
+[
+  {
+    "label": "unknown-email-a",
+    "email": "pylenium-a@example.invalid",
+    "password": "wrong-password-a"
+  },
+  {
+    "label": "unknown-email-b",
+    "email": "pylenium-b@example.invalid",
+    "password": "wrong-password-b"
+  }
+]
