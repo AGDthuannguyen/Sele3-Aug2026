@@ -1,349 +1,232 @@
-# Pylenium Framework
+# Pylenium
 
-A Python UI Automation framework built from scratch, inspired by the simplicity and design of **Playwright**.
+Pylenium is a small Selenium framework for Python. It provides lazy locators, automatic
+waits for actions, retrying assertions, and pytest fixtures. It uses Selenium WebDriver for
+browser control.
 
-## Features
+## Requirements
 
-### Layered Configuration
-Configuration is managed through a priority-based system (CLI > Env Vars > YAML > Defaults) powered by **Dynaconf**.
-- Override default settings via Environment Variables:
-  - `PYLENIUM_BROWSER__TYPE=firefox`
-  - `PYLENIUM_BROWSER__HEADLESS=true`
-  - `PYLENIUM_BROWSER__BASE_URL=https://example.com`
+- Python 3.12, 3.13, or 3.14
+- Poetry
+- An installed browser for browser tests
+- Network access for the repository's live tests against [Automation Exercise](https://www.automationexercise.com/)
 
-### Smart Locators & Auto-Wait
-Locators in Pylenium are **lazy** and **auto-wait** by default. They do not query the DOM until an action is performed, reducing the risk of `StaleElementReferenceException` by re-evaluating the DOM on retries.
+## Install
 
-**Setup Example:**
+From the repository root:
+
+```bash
+poetry install
+```
+
+## First browser session
+
 ```python
-from pylenium import Browser
+from pylenium import Browser, expect
 
-# Launch a session and wrap its current window
 browser = Browser.launch(headless=True)
 try:
-    page = browser.new_page()
-    page.goto("https://example.com")
+    page = browser.new_page(base_url="https://www.automationexercise.com/")
+    page.goto("/login")
+    expect(page.locator("[data-qa='login-email']")).to_be_visible()
 finally:
     browser.close()
 ```
 
-**Examples:**
-```python
-# Create locators using Page (auto-detects CSS vs XPath)
-username = page.locator("#username")
-button = page.get_by_role("button", name="Submit")
-link = page.get_by_text("Click me")
+`Browser.new_page()` wraps the current window. It does not open a new tab or create an
+isolated session. `browser.close()` quits the session. In pytest, use the fixtures below
+instead of closing the browser yourself.
 
-# Perform actions (automatically waits for elements to be ready)
-username.fill("testuser")  # Waits for visible, clears, then types
-button.click()             # Waits for clickable, then clicks
-text = link.text()         # Waits for visible, then returns text
-```
+## Locators and actions
 
-**Replacing text vs sending keys:**
 ```python
 from selenium.webdriver.common.keys import Keys
 
-username.fill("alice")               # Clear and replace existing content
-username.send_keys(Keys.END, "123")  # Move to the end explicitly and type more
+email = page.locator("[data-qa='login-email']")
+password = page.locator("[data-qa='login-password']")
+
+email.fill("user@example.com")       # Clear, then type
+email.send_keys(Keys.END, ".test")   # Type without clearing
+password.fill("secret")
+page.locator("[data-qa='login-button']").click()
+
+value = email.get_attribute("value")
+text = page.get_by_text("Login to your account").text()
 ```
 
-`send_keys(*values)` resolves, checks visible/enabled state and sends within one
-wait. Stale during the command now retries against a fresh element, using the
-same timeout budget. It does not clear or reposition the cursor. Each retry
-resends all values, so partial input or keyboard effects may repeat. Other command
-errors propagate. This replaces the earlier send-once policy and is not an upload helper.
+`locator()` accepts CSS or XPath selectors. A selector starting with `/`, `./`, or `(` is
+treated as XPath; other selectors use CSS. A child locator searches within its parent:
 
-`click()` uses a native Selenium click. If intercepted, it scrolls the target to
-the viewport center, then resolves again on the next poll under the original
-timeout. Scroll does not remove persistent overlays; these eventually time out.
-No JavaScript click is used to bypass browser interaction checks.
-
-`fill(text)` retries clear and typing together, clearing again before each retry.
-An empty string only clears the element. Unsupported targets raise `ValueError`;
-hidden, disabled or readonly editable controls wait until ready.
-
-**Immediate state queries (behavior change):** `is_visible()` and `is_enabled()`
-read once without waiting. Missing and stale elements now raise their Selenium
-exceptions; stale is no longer converted to `False`. A valid hidden or disabled
-element still returns `False`. Use `expect()` when retrying assertions are needed;
-stale retries in both positive and negative assertions, and only negative
-visibility accepts a missing element.
-
-**Child Scope & Collections:**
-You can chain locators to search within a parent element, or interact with multiple elements.
 ```python
-container = page.locator("#container")
-
-# Child scope: search within #container
-first_item = container.locator(".item").first()
-
-# Collections
-second_item = container.locator(".item").nth(1)
-all_items = container.locator(".item").all()
-count = container.locator(".item").count()
+items = page.locator(".list").locator(".item")
+first = items.first()
+second = items.nth(1)
+count = items.count()
+all_items = items.all()
 ```
 
-### Smart Assertions (`expect`)
-Pylenium provides an `expect()` function for assertions with **auto-retry** mechanisms. Instead of failing immediately, assertions will poll the DOM until the condition is met or the timeout is reached.
+Locators are lazy. Actions such as `click()`, `fill()`, `send_keys()`, `text()`, and
+`get_attribute()` resolve the element and retry transient failures within one timeout
+budget. An intercepted click scrolls the element into view before retrying. A `send_keys()`
+retry can repeat partial input. `count()` reads current matches without waiting; `all()`
+uses that count to return lazy indexed locators. `is_visible()` and `is_enabled()` read once
+without waiting. Missing or stale elements can raise Selenium exceptions.
 
-**Examples:**
+`get_by_role(role, name=...)` matches an explicit `role` attribute, optionally using
+`aria-label` or direct text for the name. It does not calculate the browser's accessible
+role. `get_by_text(text)` matches normalized direct text exactly. For other matching rules,
+use `locator()`.
+
+## Assertions
+
+`expect()` retries until its condition passes or its timeout expires. Text, title, and URL
+assertions use substring matching.
+
 ```python
 from pylenium import expect
 
-# Locator assertions
-expect(username).to_be_visible()
-expect(username).to_have_attribute("type", "text")
-expect(username).to_have_text("Welcome")
-
-# Negation (asserting the opposite)
-expect(hidden_element).not_.to_be_visible()
-
-# Page assertions
-expect(page).to_have_title("My Page")
-expect(page).to_have_url("dashboard")
+expect(email).to_be_visible()
+expect(email).to_be_enabled()
+expect(email).to_have_attribute("type", "email")
+expect(page).to_have_url("/login")
+expect(page.locator("#missing")).not_.to_be_visible()
 ```
 
-### Soft Assertions
+`not_.to_be_visible()` passes when the element is absent. Other negative element assertions
+require an existing element. Pass `timeout=` to `expect()` to override the configured
+assertion timeout.
 
-Use `soft_assertions()` to collect assertion failures and report them together at
-the end of a block. Each `soft.check()` runs a normal `expect()` assertion with
-its own timeout. `expect()` outside this block remains a hard assertion.
+Use `soft_assertions()` when several assertions should run before reporting their failures
+together:
 
 ```python
 from pylenium import expect, soft_assertions
 
 with soft_assertions() as soft:
-    soft.check(expect(username).to_be_visible)
-    soft.check(expect(page).to_have_title, "Dashboard")
-    soft.check(expect(error_message).not_.to_be_visible)
+    soft.check(expect(email).to_be_visible)
+    soft.check(expect(page).to_have_url, "/login")
 ```
 
-A raised `SoftAssertionError` contains the original errors in its `failures` tuple.
-Only failures raised inside `soft.check()` are collected; unexpected WebDriver
-errors still stop the test immediately.
+Each check keeps its own retry timeout. `SoftAssertionError.failures` contains the original
+`AssertionError` objects. Unexpected WebDriver errors still stop the test immediately.
 
-## Project Structure
-```text
-Sele3-Aug2026/
-├── poetry.lock             # Dependency lockfile
-├── pyproject.toml          # Poetry configuration
-├── Jenkinsfile             # Parallel unit/browser verification on Jenkins
-├── config/                 # User environment configs
-├── data/                   # Test data (JSON, CSV)
-├── pages/                  # Automation Exercise page objects (LoginPage)
-├── pylenium/               # Framework Core
-│   ├── assertions/         # Smart assertions (expect)
-│   ├── config/             # Dynaconf settings
-│   ├── core/               # Browser, Page, Locator, Strategies
-│   ├── plugins/            # pytest browser/page fixtures and CLI options
-│   ├── utils/              # JSON and CSV test-data reader
-│   └── waits/              # AutoWait backed by Selenium WebDriverWait
-├── tests/                  # Core unit tests and public-site browser tests
-└── .gitignore
-```
+## Page objects and test data
 
-See [implemented relationships](diagram/relationships_map.md) and [test lifecycle](diagram/lifecycle.md).
+Subclass `BasePage` to group locators and actions. Implement `is_loaded()` as a single
+immediate check; `wait_until_loaded()` performs the retry. `open()` navigates but does not
+wait for application readiness.
 
-## Getting Started
-
-### Prerequisites
-- **Python 3.12+**
-- **Poetry** (Package Manager)
-
-### Installation
-Clone the repository and install dependencies using Poetry:
-```bash
-poetry install
-```
-
-### Running Tests
-The framework comes with a suite of tests to verify its core functionality (Browser, Locators, Assertions):
-```bash
-poetry run pytest tests/ --headless -v
-```
-
-Automation Exercise (https://www.automationexercise.com/) is the public browser
-test target. Browser tests require network access and a working site; an outage
-is reported as a failure, not silently skipped.
-
-```bash
-poetry run pytest -m "not browser" -q  # Core and plugin tests, no website needed
-poetry run pytest -m browser --headless -q  # Live website integration tests
-```
-
-`tests/test_locator.py` and `tests/test_assertions.py` retain useful core regression
-tests from phase 3. Browser scenarios use the `browser` marker in
-`tests/test_browser_integration.py` and `tests/test_locator.py`; obsolete
-local HTML tests have been replaced. A few browser edge cases inject temporary
-elements into the current page to test quoting, readonly and contenteditable.
-
-Tests serve acceptance of the current phase, not a permanent suite requirement.
-Later phases may replace or remove checks that no longer serve their scope.
-BasePage unit checks reuse Automation Exercise's LoginPage and URLs with a mock
-driver; they do not contact another website.
-
-## Phase 4: Page Objects and pytest
-
-After `poetry install`, pytest discovers the Pylenium plugin automatically through
-its `pytest11` entry point. No manual plugin registration is needed. Tests that
-request neither `browser` nor `page` do not launch a browser.
+The repository's [LoginPage](pages/login_page.py) is an example:
 
 ```python
 from pages.login_page import LoginPage
+
+login = LoginPage(page).open().wait_until_loaded(timeout=5)
+```
+
+`DataReader.read_json(path)` and `DataReader.read_csv(path)` load UTF-8 test data. For
+example, `DataReader.read_json("data/invalid_login_cases.json")` reads the cases used by the
+repository tests. CSV input needs a header row and returns dictionaries of strings.
+
+## Run tests
+
+After installation, Pylenium's pytest plugin provides function-scoped `browser` and `page`
+fixtures. Each test requesting a browser gets its own WebDriver session, which the fixture
+closes. Tests without these fixtures do not launch a browser.
+
+```python
+import pytest
+
 from pylenium import expect
 
 
-def test_login_form(practice_page):
-    LoginPage(practice_page).wait_until_loaded(timeout=5)
-    expect(practice_page.locator("[data-qa='login-email']")).to_be_visible()
+@pytest.mark.browser
+def test_login_page(page):
+    page.goto("https://www.automationexercise.com/login")
+    expect(page.locator("[data-qa='login-email']")).to_be_visible()
 ```
 
-Run against Automation Exercise, or pass `--base-url` for a compatible deployment:
+Run from the repository root:
 
 ```bash
-poetry run pytest -m browser --browser=chrome --headless --base-url=https://www.automationexercise.com/
+poetry run pytest -m "not browser" -q
+poetry run pytest -m browser --browser=chrome --headless -q
+poetry run pytest -m browser --browser=chrome --headless -n 2 -q
 ```
 
-- `browser` and `page` are function-scoped. Each requesting test gets a new
-  WebDriver session, closed in browser teardown even if page setup or the test fails.
-- `Browser.new_page()` wraps the current window; it creates neither a tab nor a
-  new session. The browser fixture owns cleanup. Tests normally should not call
-  `page.close()` or `browser.close()` themselves.
-- CLI values override configuration without mutating global settings. Omitting
-  `--browser`, `--headless`/`--headed`, or `--base-url` retains configured values.
-  The two display flags cannot be combined.
-- Relative navigation uses `urljoin`: with base `https://host/app/`, `child`
-  becomes `/app/child`, while `/child` starts at the host root. Absolute URLs,
-  including local `file:` URLs, remain unchanged. This corrects the previous
-  string-concatenation behavior for leading slashes.
-- `is_loaded()` must be an immediate boolean check. Do not call waiting locator
-  actions or assertions inside it. `wait_until_loaded(timeout=...)` owns one
-  readiness wait. `open()` only navigates using WebDriver's page-load timeout;
-  it does not silently add a readiness wait. Chain the two explicitly when needed.
-- `tests/conftest.py` defines `practice_page`: it uses the plugin's browser fixture,
-  applies the site's base URL and opens `/login`. The plugin's generic `page`
-  fixture remains unchanged for other applications. pytest discovers conftest
-  automatically; tests do not import it.
-- The multiline strings in `test_pytest_plugin.py` are executable subprocess
-  test modules created by pytester, not commented-out code. These checks exercise
-  real fixture teardown while mocking browser creation.
+The `browser` tests visit a public website and fail if that site or the network is
+unavailable. `-n 2` uses two pytest-xdist workers and separate browser sessions.
 
-Browser creation is cleaned up if post-launch configuration fails. A cleanup
-failure is chained to the original setup exception.
+The plugin accepts `--browser`, `--headless` or `--headed`, `--base-url`, and
+`--screenshots-dir`. The two display flags cannot be combined. The repository's
+`practice_page` fixture in [tests/conftest.py](tests/conftest.py) opens Automation
+Exercise; it is an example fixture, not part of the framework API.
 
-## Batch 1: Failure reporting and GitHub Actions
+## Configuration and browser support
 
-The pytest plugin captures one PNG when setup or the test body fails and its
-browser fixture has a session. Capture happens before browser teardown, including
-when a dependent page fixture fails. It never launches a browser for reporting.
-Tests that close their session early may have no screenshot. Teardown failures
-do not trigger screenshots because the session may already be closed.
+Defaults are in [default_config.yaml](pylenium/config/default_config.yaml). Dynaconf
+also reads environment variables with the `PYLENIUM_` prefix and double underscores
+for nested keys:
 
-Screenshots are saved under `artifacts/screenshots` (override with
-`--screenshots-dir`) and attached through `allure-pytest` when that plugin is
-installed. Capture or attachment errors are diagnostic messages; they do not
-replace the test failure or prevent cleanup. Set
-`PYLENIUM_REPORTING__SCREENSHOT_ON_FAILURE=false` to disable capture.
+| Setting | Default | Environment variable |
+| --- | --- | --- |
+| Browser | Chrome | `PYLENIUM_BROWSER__TYPE` |
+| Headless | false | `PYLENIUM_BROWSER__HEADLESS` |
+| Page-load timeout | 30 seconds | `PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT` |
+| Action timeout | 10 seconds | `PYLENIUM_WAITS__TIMEOUT` |
+| Assertion timeout | 5 seconds | `PYLENIUM_ASSERTIONS__TIMEOUT` |
+| Failure screenshot | true | `PYLENIUM_REPORTING__SCREENSHOT_ON_FAILURE` |
+
+The corresponding pytest CLI options override browser type and headless mode. `--base-url`
+overrides the URL passed to the `page` fixture. Other settings in the table use environment
+variables or Dynaconf configuration; there is no general CLI override for every setting.
+
+Chrome, Firefox, and Edge are available with `--browser=chrome`, `--browser=firefox`, or
+`--browser=edge`. Safari is available on macOS with remote automation enabled and must run
+headed. Safari is not part of the default CI run.
+
+To add a driver, register a `BrowserStrategy` subclass before a browser fixture starts. For
+example, put this in a consumer project's `conftest.py`:
+
+```python
+from selenium import webdriver
+from pylenium.core.browser_strategy import BROWSER_STRATEGIES, ChromeStrategy
+
+
+class RemoteChrome(ChromeStrategy):
+    def create_driver(self, options):
+        return webdriver.Remote(
+            command_executor="http://localhost:4444",
+            options=options,
+        )
+
+BROWSER_STRATEGIES["remote_chrome"] = RemoteChrome
+```
+
+Then run with `--browser=remote_chrome`. Browser strategies are extensible; custom Locator
+and reporter registries are not currently provided.
+
+## Results and CI
+
+On a failed test with a live browser, the pytest plugin saves a screenshot in
+`artifacts/screenshots` and attaches it to Allure when the Allure pytest plugin is
+installed. Screenshot errors do not replace the test failure. pytest can also produce JUnit
+and Allure results:
 
 ```bash
 poetry run pytest --headless --junitxml=artifacts/junit.xml --alluredir=artifacts/allure-results
 ```
 
-Allure results are raw data, not an HTML report. With the Allure command-line tool
-installed separately, run `allure serve artifacts/allure-results` to view them.
-Use a fresh results directory for each run to avoid mixing old and new results.
+Allure output is raw result data; viewing it requires the Allure command-line tool.
 
-`.github/workflows/verify.yml` runs on branch pushes, pull requests targeting
-`main`, and manual dispatch. It installs the locked dependencies on Python 3.12
-and runs two independent jobs: unit/plugin tests on Linux and browser integration
-tests on Windows
-(Chrome, Firefox, and Edge headless on pushes and PRs). Both jobs upload
-available JUnit, Allure, and screenshot artifacts even if tests fail; artifacts
-are retained for 14 days.
-New runs cancel superseded runs for the same event/ref.
-The browser job opens the public Automation Exercise site. A failure of that
-site remains a CI failure with the available screenshot and test results. For
-manual runs, GitHub Actions inputs can override the browser strategy name,
-headless mode, base URL, navigation timeout, and failure limit. Push and pull
-request runs use headless mode; a manual headed run uses `xvfb-run` on the Linux
-runner. Browser names are resolved from the strategy registry when the fixture
-launches; a consumer can register a new strategy before test setup.
+[GitHub Actions](.github/workflows/verify.yml) runs unit tests and Chrome, Firefox,
+and Edge browser tests on pushes and pull requests. Manual runs can choose the browser,
+headless mode, base URL, page-load timeout, and failure limit. Safari requires a manual
+headed run on macOS. Results and available screenshots are uploaded as artifacts.
 
-Browser tests require the selected browser and access to the public practice
-site. Navigation timeouts fail CI; the workflow does not skip failures or retry
-the suite to hide them. CI allows 60 seconds for navigation through
-`PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT`; action and assertion timeouts remain
-unchanged. For a comparable local run in PowerShell:
+[Jenkinsfile](Jenkinsfile) runs unit and browser tests with two workers on a Windows
+agent. It accepts browser, base URL, and page-load timeout parameters. A real Jenkins
+run requires a configured Windows agent and installed browser.
 
-```powershell
-$env:PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT = "60"
-poetry run pytest -m browser --headless --maxfail=1
-```
-
-Failure reporting and fixture cleanup temporarily bound WebDriver HTTP reads
-to 10 seconds, restoring the original transport setting afterward. HTTP retries
-can extend that duration; CI also bounds the entire test step to 10 minutes.
-Inspect the failed step and downloaded artifacts from the Actions run.
-Jenkins and parallel execution are covered below. Package publishing is outside the current scope.
-
-## Batch 2: Cross-browser runs and test data
-
-The same `browser` tests run on Chrome, Firefox, and Edge in CI. A manual workflow
-dispatch runs only the browser named by its `browser` input. Locally, select one
-with `--browser=firefox` or `--browser=edge`. Safari is available through
-`--browser=safari` on macOS after enabling Safari's remote automation, but it
-does not support headless mode; use `--headed`. Safari is not included in the
-default CI run. To exercise Safari through a manual workflow dispatch,
-choose `browser=safari` and `headless=false`; that run uses a macOS runner.
-
-`DataReader` loads UTF-8 JSON or CSV files using Python's standard library. It
-returns parsed JSON values or CSV rows as dictionaries, and leaves file and
-parse errors unchanged:
-
-```python
-from pathlib import Path
-
-from pylenium import DataReader
-
-cases = DataReader.read_json(
-    Path(__file__).resolve().parents[1] / "data" / "invalid_login_cases.json"
-)
-rows = DataReader.read_csv("data/users.csv")
-```
-
-CSV files need a header row; values are strings. The parameterized login test in
-`tests/test_browser_integration.py` shows how to pass JSON cases to pytest.
-
-## Batch 3: Parallel execution and Jenkins
-
-pytest-xdist runs tests in separate worker processes. The function-scoped browser
-fixture launches and closes a WebDriver session for every test, including tests
-on different workers. Failure screenshot filenames use UUIDs; Allure writes
-separate result files and pytest combines worker results into one JUnit report.
-
-```bash
-poetry run pytest -m "not browser" -n 2 -q
-poetry run pytest -m browser --browser=chrome --headless -n 2 --maxfail=1
-```
-
-Each browser worker opens its own session and visits the public practice site.
-Keep the worker count within the machine's browser and memory capacity. Browser
-failures remain failures; parallel execution does not retry or skip them.
-
-`Jenkinsfile` runs on a Windows agent labeled `windows` with Python 3.12,
-Poetry 2.4.2, and the selected browser installed. Windows is intentional:
-the pipeline uses Windows PowerShell and can run Edge. It checks out a fresh
-workspace, installs locked dependencies, runs unit/plugin and public-site browser
-tests with two workers, then publishes JUnit results and archives available
-Allure data and screenshots even after a test failure. The checkout stage cleans
-the workspace once, so workers do not clean shared Allure directories.
-Create a Pipeline or Multibranch Pipeline job using the repository's
-`Jenkinsfile`. The `BROWSER`
-parameter selects Chrome, Firefox, or Edge; `BASE_URL` overrides the public
-target for a compatible deployment; `PAGE_LOAD_TIMEOUT` sets the navigation
-timeout (60 seconds by default). The pipeline uses headless mode.
-
-Safari remains a manual macOS workflow option in GitHub Actions. A Safari run
-and an actual Jenkins run require the corresponding infrastructure; local test
-results alone do not certify either environment.
+See the [class relationships](diagram/relationships_map.md) and
+[test lifecycle](diagram/lifecycle.md) diagrams for the current architecture.
