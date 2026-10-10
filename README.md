@@ -104,6 +104,24 @@ expect(page).to_have_title("My Page")
 expect(page).to_have_url("dashboard")
 ```
 
+### Soft Assertions
+
+Use `soft_assertions()` to collect assertion failures and report them together at
+the end of a block. Each `soft.check()` runs a normal `expect()` assertion with
+its own timeout. `expect()` outside this block remains a hard assertion.
+
+```python
+from pylenium import expect, soft_assertions
+
+with soft_assertions() as soft:
+    soft.check(expect(username).to_be_visible)
+    soft.check(expect(page).to_have_title, "Dashboard")
+    soft.check(expect(error_message).not_.to_be_visible)
+```
+
+Only failures raised inside `soft.check()` are collected; unexpected WebDriver
+errors still stop the test immediately.
+
 ## Project Structure
 ```text
 Sele3-Aug2026/
