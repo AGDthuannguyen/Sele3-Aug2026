@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import pytest
 from selenium.common.exceptions import InvalidSessionIdException
 
-from pylenium import Locator, Page, expect, soft_assertions
+from pylenium import Locator, Page, SoftAssertionError, expect, soft_assertions
 
 
 def test_soft_assertions_collect_multiple_locator_and_page_failures():
@@ -61,6 +61,28 @@ def test_soft_assertions_preserve_unexpected_driver_error():
 
     assert caught.value is error
     assert driver.find_elements.call_count == 1
+
+
+def test_aggregate_retains_original_assertion_errors():
+    first = AssertionError("first")
+    second = AssertionError("second")
+
+    def raise_first():
+        raise first
+
+    def raise_second():
+        raise second
+
+    with pytest.raises(SoftAssertionError) as caught:
+        with soft_assertions() as soft:
+            soft.check(raise_first)
+            soft.check(raise_second)
+
+    assert caught.value.failures[0] is first
+    assert caught.value.failures[1] is second
+    assert first.__traceback__ is not None
+    assert second.__traceback__ is not None
+    assert isinstance(caught.value, AssertionError)
 
 
 def test_soft_assertions_pass_args_and_kwargs_and_allow_empty_block():

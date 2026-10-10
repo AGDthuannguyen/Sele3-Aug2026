@@ -1,5 +1,5 @@
 from pylenium.assertions.expect import expect
-from pylenium.assertions.soft_assertions import soft_assertions
+from pylenium.assertions.soft_assertions import SoftAssertionError, soft_assertions
 from pylenium.config.config import settings
 from pylenium.core.browser import Browser
 from pylenium.core.base_page import BasePage
@@ -16,4 +16,5 @@ __all__ = [
     "settings",
     "expect",
     "soft_assertions",
+    "SoftAssertionError",
 ]

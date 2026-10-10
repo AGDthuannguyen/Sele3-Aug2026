@@ -119,6 +119,7 @@ with soft_assertions() as soft:
     soft.check(expect(error_message).not_.to_be_visible)
 ```
 
+A raised `SoftAssertionError` contains the original errors in its `failures` tuple.
 Only failures raised inside `soft.check()` are collected; unexpected WebDriver
 errors still stop the test immediately.
 
