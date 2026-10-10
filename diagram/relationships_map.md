@@ -1,174 +1,104 @@
+# Implemented relationships
+
 ```mermaid
 classDiagram
-    direction TB
+    direction LR
 
-    namespace Core {
-        class Browser {
-            -WebDriver _driver
-            -Config _config
-            +launch(browser_type, headless)$ Browser
-            +new_page() Page
-            +close()
-        }
-
-        class BrowserFactory {
-            +create(browser_type, options)$ WebDriver
-        }
-
-        class BrowserOptions {
-            -dict _options
-            +headless(enabled) BrowserOptions
-            +window_size(w, h) BrowserOptions
-            +add_argument(arg) BrowserOptions
-            +build() WebDriverOptions
-        }
-
-        class Page {
-            -WebDriver _driver
-            +goto(url)
-            +locator(selector) Locator
-            +get_by_role(role, name) Locator
-            +get_by_text(text) Locator
-            +title() str
-            +url() str
-            +screenshot(path) bytes
-            +close()
-        }
-
-        class Locator {
-            -WebDriver _driver
-            -str _selector
-            -Locator _parent
-            +click()
-            +fill(text)
-            +text() str
-            +is_visible() bool
-            +get_attribute(name) str
-            +locator(selector) Locator
-            +all() list~Locator~
-            +first() Locator
-            +nth(index) Locator
-            +count() int
-        }
-
-        class BasePage {
-            <<abstract>>
-            #Page page
-            #str URL
-            +navigate() BasePage
-            +is_loaded() bool
-            +wait_until_loaded()
-        }
+    class Browser {
+        -WebDriver _driver
+        +launch(browser_type, headless)$ Browser
+        +new_page(base_url) Page
+        +close()
+    }
+    class BrowserFactory {
+        +create(browser_type, options)$ WebDriver
+    }
+    class BrowserOptions {
+        +headless(enabled) BrowserOptions
+        +window_size(width, height) BrowserOptions
+        +add_argument(arg) BrowserOptions
+        +build()
+    }
+    class BrowserStrategy {
+        <<abstract>>
+        +create_options()
+        +create_driver(options) WebDriver
+        +apply_headless(options)
+    }
+    class ChromeStrategy
+    class FirefoxStrategy
+    class EdgeStrategy
+    class SafariStrategy
+    class Page {
+        +goto(url)
+        +locator(selector) Locator
+        +get_by_role(role, name) Locator
+        +get_by_text(text) Locator
+        +screenshot(path) bytes
+        +close()
+    }
+    class Locator {
+        +click()
+        +send_keys(values)
+        +fill(text)
+        +text() str
+        +get_attribute(name)
+        +is_visible() bool
+        +is_enabled() bool
+        +locator(selector) Locator
+        +first() Locator
+        +nth(index) Locator
+        +all() list
+        +count() int
+    }
+    class BasePage {
+        <<abstract>>
+        +open() BasePage
+        +is_loaded() bool
+        +wait_until_loaded(timeout) BasePage
+    }
+    class AutoWait {
+        +until(condition_fn, msg) Any
+    }
+    class LocatorAssertions {
+        +not_ LocatorAssertions
+        +to_be_visible()
+        +to_be_enabled()
+        +to_have_text(expected)
+        +to_have_attribute(name, value)
+    }
+    class PageAssertions {
+        +not_ PageAssertions
+        +to_have_url(expected)
+        +to_have_title(expected)
+    }
+    class DataReader {
+        +read_json(path)$
+        +read_csv(path)$ list
     }
 
-    namespace WaitAndAssertions {
-        class AutoWait {
-            -float _timeout
-            -float _polling
-            -for_visible(by, value) WebElement
-            -for_clickable(by, value) WebElement
-            +until(condition_fn, msg) Any
-        }
-
-        class WaitCondition {
-            <<enumeration>>
-            PRESENT
-            VISIBLE
-            CLICKABLE
-            INVISIBLE
-        }
-
-        class LocatorAssertions {
-            -Locator _locator
-            -float _timeout
-            -bool _is_negated
-            +to_have_text(expected)
-            +to_be_visible()
-            +to_be_enabled()
-            +to_have_attribute(name, value)
-            +not_() LocatorAssertions
-            -_retry_until(condition_fn, msg)
-        }
-
-        class PageAssertions {
-            -Page _page
-            -float _timeout
-            +to_have_url(expected)
-            +to_have_title(expected)
-            +not_() PageAssertions
-        }
-    }
-
-    namespace Infrastructure {
-        class Config {
-            <<singleton>>
-            -dict _data
-            -Config _instance$
-            +get_instance()$ Config
-            +load_file(path)
-            +get(key, default) Any
-            +browser_type() str
-            +timeout() float
-        }
-
-        class BaseReporter {
-            <<abstract>>
-            +on_test_start(name)
-            +on_test_fail(name, error)
-            +attach_screenshot(name, data)
-        }
-
-        class AllureReporter {
-            +on_test_start(name)
-            +on_test_fail(name, error)
-            +attach_screenshot(name, data)
-        }
-
-        class ScreenshotCapture {
-            +capture(page, name) bytes
-            +capture_on_failure(page, name) bytes
-        }
-
-        class PytestPlugin {
-            <<module>>
-            +pytest_addoption(parser)
-            +browser_fixture(request) Browser
-            +page_fixture(browser) Page
-            +pytest_runtest_makereport(item, call)
-        }
-
-        class DataReader {
-            +from_json(path)$ list~dict~
-            +from_csv(path)$ list~dict~
-        }
-
-    }
-
-    Browser --> BrowserFactory : delegates
+    BrowserStrategy <|-- ChromeStrategy
+    BrowserStrategy <|-- FirefoxStrategy
+    BrowserStrategy <|-- EdgeStrategy
+    BrowserStrategy <|-- SafariStrategy
+    Browser --> BrowserFactory : creates driver through
     Browser --> BrowserOptions : configures
-    Browser --> Page : creates
-    Browser --> Config : reads
-    Page --> Locator : creates
-    Locator --> AutoWait : waits via
-    Locator --> Locator : child scope
-    AutoWait --> WaitCondition : uses
-    BasePage --> Page : wraps
-
-    LocatorAssertions --> Locator : auto-retry polls
-    PageAssertions --> Page : auto-retry polls
-
-    AllureReporter --|> BaseReporter : implements
-    ScreenshotCapture --> Page : captures
-
-    PytestPlugin --> Browser : manages lifecycle
-    PytestPlugin --> Config : loads
-    PytestPlugin --> ScreenshotCapture : on failure
-    PytestPlugin --> BaseReporter : reports to
-
-    note for Locator "LAZY: Only queries DOM
-    when action is performed"
-    note for LocatorAssertions "Created by expect(locator)
-    Auto-retries until pass or timeout"
-    note for Config "Priority: CLI args >
-    env vars > file > defaults"
+    BrowserFactory --> BrowserOptions : builds
+    BrowserOptions --> BrowserStrategy : selects from registry
+    Browser --> Page : wraps current window
+    Page --> Locator : creates lazy locator
+    Locator --> Locator : scopes child locator
+    Locator --> AutoWait : retries actions
+    BasePage --> Page : navigates and checks
+    BasePage --> AutoWait : waits for readiness
+    LocatorAssertions --> Locator : reads
+    LocatorAssertions --> AutoWait : retries checks
+    PageAssertions --> Page : reads
+    PageAssertions --> AutoWait : retries checks
 ```
+
+The pytest plugin is a module, not a class. It owns function-scoped browser/page
+fixtures and captures failure screenshots. pytest-xdist runs these fixtures in
+separate worker processes; GitHub Actions and Jenkins invoke pytest and collect
+JUnit, Allure, and screenshot artifacts. `DataReader` is independent of the
+browser and assertion classes.
