@@ -16,10 +16,10 @@ pipeline {
                description: 'URL of the browser test target')
         string(name: 'PAGE_LOAD_TIMEOUT', defaultValue: '60',
                description: 'Page-load timeout in seconds')
-    }
-
-    environment {
-        PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT = "${params.PAGE_LOAD_TIMEOUT}"
+        string(name: 'ACTION_TIMEOUT', defaultValue: '10',
+               description: 'Locator action timeout in seconds')
+        string(name: 'ASSERTION_TIMEOUT', defaultValue: '5',
+               description: 'Retrying assertion timeout in seconds')
     }
 
     stages {
@@ -53,7 +53,16 @@ pipeline {
         stage('Browser tests') {
             steps {
                 powershell '''
-                    poetry run pytest -m browser -n 2 --headless --maxfail=1 "--browser=$env:BROWSER" "--base-url=$env:BASE_URL" --junitxml=artifacts/junit-browser.xml --alluredir=artifacts/allure-browser
+                    $pytestArgs = @(
+                        '-m', 'browser', '-n', '2', '--headless', '--maxfail=1',
+                        "--browser=$env:BROWSER", "--base-url=$env:BASE_URL",
+                        "--page-load-timeout=$env:PAGE_LOAD_TIMEOUT",
+                        "--action-timeout=$env:ACTION_TIMEOUT",
+                        "--assertion-timeout=$env:ASSERTION_TIMEOUT",
+                        '--junitxml=artifacts/junit-browser.xml',
+                        '--alluredir=artifacts/allure-browser'
+                    )
+                    poetry run pytest @pytestArgs
                     exit $LASTEXITCODE
                 '''
             }

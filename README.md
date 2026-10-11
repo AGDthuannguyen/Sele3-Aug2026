@@ -157,9 +157,11 @@ poetry run pytest -m browser --browser=chrome --headless -n 2 -q
 The `browser` tests visit a public website and fail if that site or the network is
 unavailable. `-n 2` uses two pytest-xdist workers and separate browser sessions.
 
-The plugin accepts `--browser`, `--headless` or `--headed`, `--base-url`, and
-`--screenshots-dir`. The two display flags cannot be combined. The repository's
-`practice_page` fixture in [tests/conftest.py](tests/conftest.py) opens Automation
+The plugin accepts `--browser`, `--headless` or `--headed`, `--base-url`,
+`--screenshots-dir`, `--page-load-timeout`, `--action-timeout`, and
+`--assertion-timeout`. The two display flags cannot be combined. Timeouts are
+finite, non-negative seconds; zero makes action and assertion checks immediate.
+The repository's `practice_page` fixture in [tests/conftest.py](tests/conftest.py) opens Automation
 Exercise; it is an example fixture, not part of the framework API.
 
 ## Configuration and browser support
@@ -177,9 +179,11 @@ for nested keys:
 | Assertion timeout | 5 seconds | `PYLENIUM_ASSERTIONS__TIMEOUT` |
 | Failure screenshot | true | `PYLENIUM_REPORTING__SCREENSHOT_ON_FAILURE` |
 
-The corresponding pytest CLI options override browser type and headless mode. `--base-url`
-overrides the URL passed to the `page` fixture. Other settings in the table use environment
-variables or Dynaconf configuration; there is no general CLI override for every setting.
+The corresponding pytest CLI options override browser type, headless mode, and the three
+timeouts. `--base-url` overrides the URL passed to the `page` fixture. Explicit API
+timeout arguments take priority over CLI settings, which take priority over environment
+variables and defaults. Polling intervals and screenshot behavior use environment variables
+or Dynaconf configuration; there is no general CLI override for every setting.
 
 Chrome, Firefox, and Edge are available with `--browser=chrome`, `--browser=firefox`, or
 `--browser=edge`. Safari is available on macOS with remote automation enabled and must run
@@ -221,12 +225,12 @@ Allure output is raw result data; viewing it requires the Allure command-line to
 
 [GitHub Actions](.github/workflows/verify.yml) runs unit tests and Chrome, Firefox,
 and Edge browser tests on pushes and pull requests. Manual runs can choose the browser,
-headless mode, base URL, page-load timeout, and failure limit. Safari requires a manual
-headed run on macOS. Results and available screenshots are uploaded as artifacts.
+headless mode, base URL, page-load, action and assertion timeouts, and failure limit.
+Safari requires a manual headed run on macOS. Results and available screenshots are uploaded as artifacts.
 
 [Jenkinsfile](Jenkinsfile) runs unit and browser tests with two workers on a Windows
-agent. It accepts browser, base URL, and page-load timeout parameters. A real Jenkins
-run requires a configured Windows agent and installed browser.
+agent. It accepts browser, base URL, and page-load, action and assertion timeout parameters.
+A real Jenkins run requires a configured Windows agent and installed browser.
 
 See the [class relationships](diagram/relationships_map.md) and
 [test lifecycle](diagram/lifecycle.md) diagrams for the current architecture.

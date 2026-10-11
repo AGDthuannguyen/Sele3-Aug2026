@@ -1,6 +1,7 @@
 """Per-test browser sessions, CLI overrides, and failure screenshots."""
 
 import logging
+import math
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -14,7 +15,14 @@ from pylenium.core.page import Page
 
 
 _browser_session = pytest.StashKey[Browser]()
+_previous_timeout_settings = pytest.StashKey[dict[str, object]]()
 logger = logging.getLogger(__name__)
+
+_TIMEOUT_OPTIONS = {
+    "--page-load-timeout": "browser.page_load_timeout",
+    "--action-timeout": "waits.timeout",
+    "--assertion-timeout": "assertions.timeout",
+}
 
 
 @contextmanager
@@ -44,11 +52,37 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption("--base-url", default=None, help="Base URL for relative page navigation")
     group.addoption("--screenshots-dir", default="artifacts/screenshots",
                     help="Directory for failure screenshots")
+    group.addoption("--page-load-timeout", type=float, default=None,
+                    help="Override the browser navigation timeout in seconds")
+    group.addoption("--action-timeout", type=float, default=None,
+                    help="Override the locator action timeout in seconds")
+    group.addoption("--assertion-timeout", type=float, default=None,
+                    help="Override the retrying assertion timeout in seconds")
 
 
 def pytest_configure(config: pytest.Config) -> None:
     if config.getoption("--headless") and config.getoption("--headed"):
         raise pytest.UsageError("Choose either --headless or --headed")
+
+    overrides = {}
+    for option, setting in _TIMEOUT_OPTIONS.items():
+        value = config.getoption(option)
+        if value is None:
+            continue
+        if not math.isfinite(value) or value < 0:
+            raise pytest.UsageError(f"{option} must be a finite, non-negative number")
+        overrides[setting] = value
+
+    config.stash[_previous_timeout_settings] = {
+        setting: settings.get(setting) for setting in overrides
+    }
+    for setting, value in overrides.items():
+        settings.set(setting, value)
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    for setting, previous in config.stash.get(_previous_timeout_settings, {}).items():
+        settings.set(setting, previous)
 
 
 @pytest.fixture

@@ -291,3 +291,58 @@ def test_failure(browser, case):
     assert all(any(item["type"] == "image/png" for item in record.get("attachments", []))
                for record in records)
     assert len(list(ElementTree.parse(pytester.path / "result.xml").iter("failure"))) == 4
+
+
+def test_cli_timeouts_override_environment(pytester, monkeypatch):
+    monkeypatch.setenv("PYLENIUM_BROWSER__PAGE_LOAD_TIMEOUT", "80")
+    monkeypatch.setenv("PYLENIUM_WAITS__TIMEOUT", "20")
+    monkeypatch.setenv("PYLENIUM_ASSERTIONS__TIMEOUT", "15")
+    pytester.makepyfile('''
+from unittest.mock import Mock
+
+from pylenium import Browser
+from pylenium.config.config import settings
+from pylenium.core.browser_factory import BrowserFactory
+
+
+def test_timeout_overrides(monkeypatch):
+    assert settings.get("browser.page_load_timeout") == 42
+    assert settings.get("waits.timeout") == 2.5
+    assert settings.get("assertions.timeout") == 3.5
+    driver = Mock()
+    monkeypatch.setattr(BrowserFactory, "create", Mock(return_value=driver))
+    Browser.launch().close()
+    driver.set_page_load_timeout.assert_called_once_with(42)
+''')
+    pytester.runpytest_subprocess(
+        "-q", "--page-load-timeout=42", "--action-timeout=2.5",
+        "--assertion-timeout=3.5",
+    ).assert_outcomes(passed=1)
+
+
+def test_cli_timeout_zero_and_settings_restored():
+    from pylenium.config.config import settings
+    from pylenium.plugins.pytest_plugin import pytest_configure, pytest_unconfigure
+
+    original = settings.get("waits.timeout")
+    config = Mock()
+    config.stash = pytest.Stash()
+    config.getoption.side_effect = lambda option: 0.0 if option == "--action-timeout" else None
+    try:
+        pytest_configure(config)
+        assert settings.get("waits.timeout") == 0.0
+    finally:
+        pytest_unconfigure(config)
+    assert settings.get("waits.timeout") == original
+
+
+@pytest.mark.parametrize("option,value", [
+    ("--page-load-timeout", "-1"),
+    ("--action-timeout", "nan"),
+    ("--assertion-timeout", "inf"),
+])
+def test_invalid_cli_timeout_is_usage_error(pytester, option, value):
+    pytester.makepyfile("def test_unused(): pass")
+    result = pytester.runpytest_subprocess(f"{option}={value}")
+    assert result.ret == 4
+    result.stderr.fnmatch_lines([f"*{option} must be a finite, non-negative number*"])
