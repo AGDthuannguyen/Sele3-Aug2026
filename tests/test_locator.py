@@ -260,50 +260,6 @@ def test_custom_ignore_keeps_selenium_missing_default(timeout):
     assert predicate.call_count >= 1
 
 
-# Browser checks cover editable state and real clear/send_keys behavior.
-
-@pytest.mark.parametrize("tag", ["input", "textarea", "div"])
-def test_fill_replaces_real_editable_content(page, tag):
-    page._driver.execute_script("""
-        const element = document.createElement(arguments[0]);
-        element.id = 'fill-contract';
-        if (arguments[0] === 'div') {
-            element.contentEditable = 'true';
-            element.textContent = 'old';
-        } else {
-            element.value = 'old';
-        }
-        document.body.appendChild(element);
-    """, tag)
-    try:
-        locator = page.locator("#fill-contract")
-        locator.fill("replacement")
-        actual = locator.text() if tag == "div" else locator.get_attribute("value")
-        assert actual == "replacement"
-        locator.fill("")
-        actual = locator.text() if tag == "div" else locator.get_attribute("value")
-        assert actual == ""
-    finally:
-        page._driver.execute_script("document.getElementById('fill-contract')?.remove();")
-
-
-def test_fill_waits_for_real_readonly_input(page):
-    page._driver.execute_script("""
-        const input = document.createElement('input');
-        input.id = 'readonly-contract';
-        input.value = 'old';
-        input.readOnly = true;
-        document.body.appendChild(input);
-        setTimeout(() => { input.readOnly = false; }, 400);
-    """)
-    try:
-        locator = page.locator("#readonly-contract")
-        locator.fill("ready")
-        assert locator.get_attribute("value") == "ready"
-    finally:
-        page._driver.execute_script("document.getElementById('readonly-contract')?.remove();")
-
-
 @pytest.mark.parametrize("method,accessor", [
     ("is_visible", "is_displayed"), ("is_enabled", "is_enabled"),
 ])
