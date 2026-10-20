@@ -5,6 +5,7 @@ from pylenium.core.browser import Browser
 from pylenium.core.base_page import BasePage
 from pylenium.core.locator import Locator
 from pylenium.core.page import Page
+from pylenium.reporting import step
 from pylenium.utils.data_reader import DataReader
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "expect",
     "soft_assertions",
     "SoftAssertionError",
+    "step",
 ]

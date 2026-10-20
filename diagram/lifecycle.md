@@ -7,9 +7,10 @@ sequenceDiagram
     participant Plugin as Pylenium pytest plugin
     participant Browser
     participant Page
-    participant Results as JUnit / Allure
+    participant Results as Latest report directory
 
     Runner->>Pytest: pytest ... [-n 2]
+    Plugin->>Results: Clear and create latest directory for JUnit, Allure, steps, and screenshots
     Note over Pytest: With -n 2, each worker runs assigned tests in a separate process
     Note over Pytest,Plugin: Plugin is discovered through the pytest11 entry point
 
@@ -20,19 +21,20 @@ sequenceDiagram
         Browser-->>Page: Wrap current window
         Plugin-->>Pytest: Inject browser / page
         Pytest->>Page: Navigate and interact
+        Page->>Results: Record public actions and assertions as nested steps
         Pytest->>Plugin: Test or setup result
 
         opt Setup or test body failed with a live browser
             Plugin->>Page: screenshot(path)
             Page-->>Plugin: PNG bytes
-            Plugin->>Results: Attach PNG to Allure when installed
+            Plugin->>Results: Save PNG and attach it to Allure when installed
             Note over Plugin: Screenshot errors preserve the original failure
         end
 
         Plugin->>Browser: close() / driver.quit()
-        Pytest->>Results: Record outcome
+        Pytest->>Results: Record outcome and reporter-independent steps
     end
 
     Note over Pytest,Results: Workers use separate WebDriver sessions and JUnit combines their outcomes
-    Runner->>Results: Collect JUnit, Allure data, and available PNGs
+    Runner->>Results: Collect this run's JUnit, Allure data, steps, and PNGs
 ```

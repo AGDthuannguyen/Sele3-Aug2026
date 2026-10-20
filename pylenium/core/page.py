@@ -9,6 +9,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 
 from pylenium.config.config import settings
 from pylenium.core.locator import Locator
+from pylenium.reporting import record_step
 
 
 def _xpath_literal(text: str) -> str:
@@ -45,7 +46,8 @@ class Page:
                 base_url = settings.get("browser.base_url", "")
             if base_url:
                 url = urljoin(base_url.rstrip("/") + "/", url)
-        self._driver.get(url)
+        with record_step(f"Navigate to {url}"):
+            self._driver.get(url)
 
     def title(self) -> str:
         """Get the page title."""

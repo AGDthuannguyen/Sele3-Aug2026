@@ -44,7 +44,7 @@ pipeline {
         stage('Unit and plugin tests') {
             steps {
                 powershell '''
-                    poetry run pytest -m "not browser" -n 2 -q --junitxml=artifacts/junit-unit.xml --alluredir=artifacts/allure-unit
+                    poetry run pytest -m "not browser" -n 2 -q --reports-root=artifacts/unit
                     exit $LASTEXITCODE
                 '''
             }
@@ -59,8 +59,7 @@ pipeline {
                         "--page-load-timeout=$env:PAGE_LOAD_TIMEOUT",
                         "--action-timeout=$env:ACTION_TIMEOUT",
                         "--assertion-timeout=$env:ASSERTION_TIMEOUT",
-                        '--junitxml=artifacts/junit-browser.xml',
-                        '--alluredir=artifacts/allure-browser'
+                        '--reports-root=artifacts/browser'
                     )
                     poetry run pytest @pytestArgs
                     exit $LASTEXITCODE
@@ -71,7 +70,7 @@ pipeline {
 
     post {
         always {
-            junit allowEmptyResults: true, testResults: 'artifacts/junit-*.xml'
+            junit allowEmptyResults: true, testResults: 'artifacts/*/latest/junit.xml'
             archiveArtifacts allowEmptyArchive: true, artifacts: 'artifacts/**/*'
         }
     }
