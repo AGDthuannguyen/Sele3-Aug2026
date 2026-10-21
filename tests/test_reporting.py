@@ -1,6 +1,9 @@
 """Focused checks for reusable steps and one report directory per pytest run."""
 
 import json
+import sys
+from subprocess import TimeoutExpired
+from time import monotonic, sleep
 from xml.etree import ElementTree
 
 import pytest
@@ -70,10 +73,9 @@ def test_two():
     result.assert_outcomes(passed=2)
 
     root = pytester.path / "artifacts"
-    directories = [path for path in root.iterdir() if path.is_dir()]
+    directories = list((root / "runs").iterdir())
     assert len(directories) == 1
     run = root / "latest"
-    assert directories == [run]
     assert len(list((run / "steps").glob("*.json"))) == 2
     allure_records = [
         json.loads(path.read_text())
@@ -115,3 +117,73 @@ def test_next_run_replaces_previous_report(pytester):
     pytester.runpytest_subprocess("-q").assert_outcomes(passed=1)
     assert not old_file.exists()
     assert (run / "junit.xml").exists()
+    assert len(list((pytester.path / "artifacts" / "runs").iterdir())) == 2
+
+
+def test_concurrent_pytest_invocations_keep_active_evidence(pytester):
+    pytester.makepyfile(
+        test_slow="""
+from pathlib import Path
+from time import monotonic, sleep
+
+def test_slow():
+    Path("started").touch()
+    deadline = monotonic() + 15
+    while not Path("release").exists():
+        assert monotonic() < deadline, "release signal did not arrive"
+        sleep(0.05)
+""",
+        test_fast="def test_fast(): pass",
+    )
+    process = pytester.popen((sys.executable, "-mpytest", "-q", "test_slow.py"))
+    try:
+        deadline = monotonic() + 10
+        while not (pytester.path / "started").exists():
+            assert process.poll() is None, "first pytest invocation exited early"
+            assert monotonic() < deadline, "first pytest invocation did not start"
+            sleep(0.05)
+
+        runs = pytester.path / "artifacts" / "runs"
+        active = next(runs.iterdir())
+        assert (active / "run.json").exists()
+        pytester.runpytest_subprocess("-q", "test_fast.py").assert_outcomes(passed=1)
+        assert (active / "run.json").exists()
+        assert not (active / "junit.xml").exists()
+        assert len(list(runs.iterdir())) == 2
+    finally:
+        (pytester.path / "release").touch()
+        try:
+            output, errors = process.communicate(timeout=15)
+        except TimeoutExpired:
+            process.kill()
+            output, errors = process.communicate()
+            pytest.fail(f"first pytest invocation hung: {output!r} {errors!r}")
+
+    assert process.returncode == 0, f"{output!r} {errors!r}"
+    assert (active / "junit.xml").exists()
+
+
+def test_junit_summary_includes_teardown_step_once(pytester):
+    pytester.makeconftest("""
+import pytest
+from pylenium import step
+
+@pytest.fixture
+def resource():
+    yield
+
+    @step("Release resource")
+    def release():
+        pass
+
+    release()
+""")
+    pytester.makepyfile("def test_cleanup(resource): pass")
+    pytester.runpytest_subprocess("-q").assert_outcomes(passed=1)
+
+    run = pytester.path / "artifacts" / "latest"
+    junit = ElementTree.parse(run / "junit.xml")
+    summaries = [node.get("value") for node in junit.iter("property")
+                 if node.get("name") == "pylenium_steps"]
+    assert len(summaries) == 1
+    assert "PASSED: Release resource" in summaries[0]

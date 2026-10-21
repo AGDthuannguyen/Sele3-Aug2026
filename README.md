@@ -230,10 +230,12 @@ and reporter registries are not currently provided.
 
 ## Results and CI
 
-Each local pytest invocation replaces `artifacts/latest/`. It contains `junit.xml`,
-neutral step records in `steps/`, and `allure-results/` when Allure pytest is
-installed. Failure screenshots go to `screenshots/`
-and are attached to Allure. Screenshot failures do not replace the test failure.
+Each pytest invocation writes into its own `artifacts/runs/<run-id>/` directory.
+After it finishes, the plugin copies that run into `artifacts/latest/` for easy
+access; starting another run does not delete an active run's evidence. The report
+contains `junit.xml`, neutral step records in `steps/`, and `allure-results/`
+when Allure pytest is installed. Failure screenshots go to `screenshots/` and
+are attached to Allure. Screenshot failures do not replace the test failure.
 For a quick local demonstration in PowerShell or Command Prompt:
 
 ```powershell

@@ -108,6 +108,7 @@ classDiagram
 The pytest plugin is a module, not a class. It owns function-scoped browser/page
 fixtures, activates a per-test step recorder, and captures failure screenshots.
 pytest-xdist runs these fixtures in separate worker processes while sharing one
-latest report directory per invocation. GitHub Actions and Jenkins invoke
+isolated report directory per invocation, then copies the completed report to
+`latest/`. GitHub Actions and Jenkins invoke
 pytest and collect JUnit, Allure, step, and screenshot artifacts. `DataReader`
 is independent of the browser and assertion classes.

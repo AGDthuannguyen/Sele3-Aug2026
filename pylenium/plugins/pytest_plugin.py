@@ -30,18 +30,33 @@ _TIMEOUT_OPTIONS = {
 }
 
 
-def _latest_run_directory(root: Path) -> Path:
-    """Start with an empty, predictable directory for this pytest invocation."""
-    root.mkdir(parents=True, exist_ok=True)
-    directory = root / "latest"
-    if directory.is_symlink():
-        raise pytest.UsageError(f"Report directory must not be a symlink: {directory}")
-    if directory.exists():
-        if not directory.is_dir():
-            raise pytest.UsageError(f"Report path is not a directory: {directory}")
-        shutil.rmtree(directory)
+def _new_run_directory(root: Path) -> Path:
+    """Keep concurrent pytest invocations in separate directories."""
+    runs = root.resolve() / "runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    now = datetime.now().astimezone()
+    name = now.strftime("%Y-%m-%d-%H-%M-%S-") + f"{now.microsecond // 1000:03d}"
+    directory = runs / f"{name}-{uuid4().hex[:8]}"
     directory.mkdir()
     return directory
+
+
+def _publish_latest(root: Path, directory: Path) -> None:
+    """Replace the convenient latest copy only after the run has finished."""
+    latest = root / "latest"
+    if latest.is_symlink():
+        raise ValueError(f"Report directory must not be a symlink: {latest}")
+    staged = root / f".latest-{uuid4().hex}"
+    try:
+        shutil.copytree(directory, staged)
+        if latest.exists():
+            if not latest.is_dir():
+                raise ValueError(f"Report path is not a directory: {latest}")
+            shutil.rmtree(latest)
+        staged.rename(latest)
+    finally:
+        if staged.exists():
+            shutil.rmtree(staged)
 
 
 def _configure_reports(config: pytest.Config) -> None:
@@ -50,7 +65,7 @@ def _configure_reports(config: pytest.Config) -> None:
         directory = Path(config.workerinput["pylenium_run_directory"])
     else:
         root = Path(config.getoption("--reports-root"))
-        directory = _latest_run_directory(root)
+        directory = _new_run_directory(root)
         (directory / "run.json").write_text(json.dumps({
             "started": datetime.now().astimezone().isoformat(),
             "directory": str(directory.resolve()),
@@ -105,7 +120,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
                     help="Run with a visible browser window")
     group.addoption("--base-url", default=None, help="Base URL for relative page navigation")
     group.addoption("--reports-root", default="artifacts",
-                    help="Root directory for the latest test report")
+                    help="Root directory for isolated runs and the latest completed report")
     group.addoption("--screenshots-dir", default=None,
                     help="Directory for failure screenshots")
     group.addoption("--page-load-timeout", type=float, default=None,
@@ -144,6 +159,19 @@ def pytest_unconfigure(config: pytest.Config) -> None:
         settings.set(setting, previous)
 
 
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int):
+    """Publish after JUnit and other reporters have written their files."""
+    result = yield
+    config = session.config
+    if not hasattr(config, "workerinput"):
+        try:
+            _publish_latest(Path(config.getoption("--reports-root")).resolve(), config.stash[_run_directory])
+        except (OSError, ValueError) as error:
+            logger.warning("Latest report unavailable: %s", error)
+    return result
+
+
 @pytest.hookimpl(optionalhook=True)
 def pytest_configure_node(node) -> None:
     """Share the controller's run directory with every xdist worker."""
@@ -178,10 +206,12 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None):
 
 
 def pytest_terminal_summary(terminalreporter) -> None:
-    """Make the report directory discoverable after a local run."""
-    directory = terminalreporter.config.stash.get(_run_directory, None)
-    if directory is not None:
-        terminalreporter.write_sep("-", f"Pylenium reports: {directory.resolve()}")
+    """Show the stable path to the completed local report."""
+    config = terminalreporter.config
+    if config.stash.get(_run_directory, None) is not None:
+        latest = Path(config.getoption("--reports-root")).resolve() / "latest"
+        if latest.exists():
+            terminalreporter.write_sep("-", f"Pylenium reports: {latest.resolve()}")
 
 
 @pytest.fixture
@@ -215,11 +245,11 @@ def pytest_runtest_makereport(
     """Capture setup/call failures while the fixture's session is still alive."""
     report = yield
     recorder = current_recorder()
-    if recorder is not None and report.when in ("setup", "call") and recorder.steps:
+    if recorder is not None and recorder.steps:
         summary = _step_summary(recorder.steps)
         report.sections.append(("Pylenium steps", summary))
-        if report.when == "call" or report.failed:
-            item.user_properties.append(("pylenium_steps", summary))
+        if report.when == "teardown":
+            report.user_properties.append(("pylenium_steps", summary))
     session = item.stash.get(_browser_session, None)
     if not report.failed or report.when not in ("setup", "call") or session is None:
         return report

@@ -7,10 +7,11 @@ sequenceDiagram
     participant Plugin as Pylenium pytest plugin
     participant Browser
     participant Page
-    participant Results as Latest report directory
+    participant Results as Isolated run directory
+    participant Latest as Latest completed report
 
     Runner->>Pytest: pytest ... [-n 2]
-    Plugin->>Results: Clear and create latest directory for JUnit, Allure, steps, and screenshots
+    Plugin->>Results: Create a new directory for JUnit, Allure, steps, and screenshots
     Note over Pytest: With -n 2, each worker runs assigned tests in a separate process
     Note over Pytest,Plugin: Plugin is discovered through the pytest11 entry point
 
@@ -36,5 +37,6 @@ sequenceDiagram
     end
 
     Note over Pytest,Results: Workers use separate WebDriver sessions and JUnit combines their outcomes
+    Plugin->>Latest: Copy completed run after reporters finish
     Runner->>Results: Collect this run's JUnit, Allure data, steps, and PNGs
 ```
