@@ -2,7 +2,7 @@
 
 import json
 import sys
-from subprocess import TimeoutExpired
+from subprocess import DEVNULL, TimeoutExpired
 from time import monotonic, sleep
 from xml.etree import ElementTree
 
@@ -135,7 +135,8 @@ def test_slow():
 """,
         test_fast="def test_fast(): pass",
     )
-    process = pytester.popen((sys.executable, "-mpytest", "-q", "test_slow.py"))
+    process = pytester.popen((sys.executable, "-mpytest", "-q", "test_slow.py"),
+                             stdin=DEVNULL)
     try:
         deadline = monotonic() + 10
         while not (pytester.path / "started").exists():
