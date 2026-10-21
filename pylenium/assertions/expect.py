@@ -21,6 +21,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from pylenium.config.config import settings
 from pylenium.core.locator import Locator
 from pylenium.core.page import Page
+from pylenium.reporting import record_step
 from pylenium.waits.auto_wait import AutoWait
 
 
@@ -38,6 +39,7 @@ def _wait_for_assertion(
     wait: AutoWait,
     check: Callable[[], tuple[bool, str]],
     message: str,
+    step_name: str,
 ) -> None:
     """Poll a complete assertion decision; never invert missing/stale outcomes.
 
@@ -53,19 +55,27 @@ def _wait_for_assertion(
             passed, last_state = check()
             return passed
         except (NoSuchElementException, StaleElementReferenceException) as error:
-            last_state = type(error).__name__
+            last_state = (
+                "element not found (NoSuchElementException)"
+                if isinstance(error, NoSuchElementException)
+                else "element became stale (StaleElementReferenceException)"
+            )
             return False
         except TimeoutException as error:
             # A driver command timeout is not the assertion's polling deadline.
             read_timeout = error
             raise
 
-    try:
-        wait.until(poll, msg=message)
-    except TimeoutException as error:
-        if error is read_timeout:
-            raise
-        raise AssertionError(f"{message}\nLast state: {last_state}") from error
+    with record_step(step_name):
+        try:
+            wait.until(poll, msg=message)
+        except TimeoutException as error:
+            if error is read_timeout:
+                raise
+            raise AssertionError(
+                f"{message}\nLast state: {last_state}\n"
+                f"Timeout: {wait._timeout:g} seconds"
+            ) from None
 
 
 class LocatorAssertions:
@@ -92,12 +102,13 @@ class LocatorAssertions:
             try:
                 visible = self._locator._find_element().is_displayed()
             except NoSuchElementException:
-                return self._is_negated, "missing"
-            return visible == expected, f"visible={visible}"
+                return self._is_negated, "element not found (NoSuchElementException)"
+            return visible == expected, "visible" if visible else "hidden"
 
         _wait_for_assertion(
             self._wait, check,
-            f"Expected {self._locator!r} to have visible={expected}",
+            f"Expected {self._locator!r} to be {'visible' if expected else 'not visible'}",
+            f"{self._locator._selector} is {'visible' if expected else 'not visible'}",
         )
 
     def to_be_enabled(self) -> None:
@@ -106,11 +117,12 @@ class LocatorAssertions:
 
         def check() -> tuple[bool, str]:
             enabled = self._locator._find_element().is_enabled()
-            return enabled == expected, f"enabled={enabled}"
+            return enabled == expected, "enabled" if enabled else "disabled"
 
         _wait_for_assertion(
             self._wait, check,
-            f"Expected {self._locator!r} to have enabled={expected}",
+            f"Expected {self._locator!r} to be {'enabled' if expected else 'disabled'}",
+            f"Check {self._locator._selector} is {'enabled' if expected else 'disabled'}",
         )
 
     def to_have_text(self, expected: str) -> None:
@@ -118,12 +130,13 @@ class LocatorAssertions:
         def check() -> tuple[bool, str]:
             actual = self._locator._find_element().text
             passed = expected not in actual if self._is_negated else expected in actual
-            return passed, f"text={actual!r}"
+            return passed, f"text is {actual!r}"
 
         comparison = "not contain" if self._is_negated else "contain"
         _wait_for_assertion(
             self._wait, check,
             f"Expected {self._locator!r} to {comparison} text {expected!r}",
+            f"Check {self._locator._selector} text {'does not contain' if self._is_negated else 'contains'} {expected!r}",
         )
 
     def to_have_attribute(self, name: str, value: str) -> None:
@@ -135,12 +148,13 @@ class LocatorAssertions:
         def check() -> tuple[bool, str]:
             actual = self._locator._find_element().get_attribute(name)
             passed = actual != value if self._is_negated else actual == value
-            return passed, f"attribute {name!r}={actual!r}"
+            return passed, f"attribute {name!r} is {actual!r}"
 
         comparison = "not equal" if self._is_negated else "equal"
         _wait_for_assertion(
             self._wait, check,
             f"Expected {self._locator!r} attribute {name!r} to {comparison} {value!r}",
+            f"Check {self._locator._selector} attribute {name!r} is {'not ' if self._is_negated else ''}{value!r}",
         )
 
 
@@ -165,20 +179,22 @@ class PageAssertions:
         def check() -> tuple[bool, str]:
             actual = self._page.url()
             passed = expected not in actual if self._is_negated else expected in actual
-            return passed, f"url={actual!r}"
+            return passed, f"URL is {actual!r}"
 
         comparison = "not contain" if self._is_negated else "contain"
-        _wait_for_assertion(self._wait, check, f"Expected page URL to {comparison} {expected!r}")
+        _wait_for_assertion(self._wait, check, f"Expected page URL to {comparison} {expected!r}",
+                            f"Check page URL {'does not contain' if self._is_negated else 'contains'} {expected!r}")
 
     def to_have_title(self, expected: str) -> None:
         """Require the title to contain (or not contain) the substring."""
         def check() -> tuple[bool, str]:
             actual = self._page.title()
             passed = expected not in actual if self._is_negated else expected in actual
-            return passed, f"title={actual!r}"
+            return passed, f"title is {actual!r}"
 
         comparison = "not contain" if self._is_negated else "contain"
-        _wait_for_assertion(self._wait, check, f"Expected page title to {comparison} {expected!r}")
+        _wait_for_assertion(self._wait, check, f"Expected page title to {comparison} {expected!r}",
+                            f"Check page title {'does not contain' if self._is_negated else 'contains'} {expected!r}")
 
 
 @overload

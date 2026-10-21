@@ -7,6 +7,7 @@ from selenium.common.exceptions import NoSuchElementException, StaleElementRefer
 
 from pylenium.core.page import Page
 from pylenium.waits.auto_wait import AutoWait
+from pylenium.reporting import step
 
 
 class BasePage(ABC):
@@ -25,6 +26,7 @@ class BasePage(ABC):
     def is_loaded(self) -> bool:
         """Check readiness once; do not call waiting actions or expect() here."""
 
+    @step("Wait for {page} to load")
     def wait_until_loaded(self, *, timeout: float | None = None) -> Self:
         """Retry missing/stale readiness checks under one timeout budget."""
         AutoWait(
@@ -33,6 +35,7 @@ class BasePage(ABC):
         ).until(lambda _: self.is_loaded(), msg=f"{type(self).__name__} did not load")
         return self
 
+    @step("Open {page}")
     def open(self) -> Self:
         """Navigate to URL without starting a second readiness wait."""
         if not self.URL:

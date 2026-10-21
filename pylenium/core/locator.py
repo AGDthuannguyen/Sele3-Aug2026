@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import nullcontext
 from typing import TypeVar
 
 from selenium.common.exceptions import (
@@ -17,6 +18,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 
 from pylenium.waits.auto_wait import AutoWait
+from pylenium.reporting import record_step
 
 T = TypeVar("T")
 
@@ -86,6 +88,7 @@ class Locator:
             description="click",
             ready=lambda element: element.is_displayed() and element.is_enabled(),
             retry_exceptions=(ElementClickInterceptedException, ElementNotInteractableException),
+            report_action=True,
         )
 
     def send_keys(self, *values: str) -> None:
@@ -99,6 +102,7 @@ class Locator:
             lambda element: element.send_keys(*values),
             description="send keys",
             ready=lambda element: element.is_displayed() and element.is_enabled(),
+            report_action=True,
         )
 
     def fill(self, text: str) -> None:
@@ -123,6 +127,7 @@ class Locator:
             description="fill",
             ready=_is_ready_for_fill,
             retry_exceptions=(InvalidElementStateException,),
+            report_action=True,
         )
 
     def text(self) -> str:
@@ -213,6 +218,7 @@ class Locator:
         description: str,
         ready: Callable[[WebElement], bool] | None = None,
         retry_exceptions: tuple[type[Exception], ...] = (),
+        report_action: bool = False,
     ) -> T:
         """Own the single action wait: resolve, check readiness, apply operation.
 
@@ -230,7 +236,9 @@ class Locator:
                 return False
             return (operation(element),)
 
-        result = wait.until(attempt, msg=f"Failed to {description}: {self!r}")
+        context = record_step(f"{description.capitalize()} {self!r}") if report_action else nullcontext()
+        with context:
+            result = wait.until(attempt, msg=f"Failed to {description}: {self!r}")
         return result[0]
 
     def __repr__(self) -> str:

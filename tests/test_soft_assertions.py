@@ -26,7 +26,7 @@ def test_soft_assertions_collect_multiple_locator_and_page_failures():
     assert "2 soft assertion(s) failed" in message
     assert "1. Expected Locator" in message
     assert "2. Expected page title" in message
-    assert "Last state: missing" in message
+    assert "Last state: element not found" in message
     assert driver.find_elements.call_count == 1
 
 
@@ -41,7 +41,7 @@ def test_soft_assertions_preserve_negative_assertion_semantics():
             soft.check(expect(missing, timeout=0).not_.to_be_enabled)
 
     assert "1 soft assertion(s) failed" in str(caught.value)
-    assert "enabled=False" in str(caught.value)
+    assert "Last state: element not found" in str(caught.value)
     assert driver.find_elements.call_count == 2
 
 

@@ -1,6 +1,6 @@
 """Login form on Automation Exercise."""
 
-from pylenium import BasePage, Page
+from pylenium import BasePage, Page, step
 
 
 class LoginPage(BasePage):
@@ -15,6 +15,7 @@ class LoginPage(BasePage):
     def is_loaded(self) -> bool:
         return self._email.is_visible()
 
+    @step("Submit login form")
     def login(self, email: str, password: str) -> None:
         """Submit credentials; the caller decides which outcome to assert."""
         self._email.fill(email)

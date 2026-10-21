@@ -60,6 +60,9 @@ classDiagram
     class AutoWait {
         +until(condition_fn, msg) Any
     }
+    class StepRecorder {
+        +steps list
+    }
     class LocatorAssertions {
         +not_ LocatorAssertions
         +to_be_visible()
@@ -95,10 +98,17 @@ classDiagram
     LocatorAssertions --> AutoWait : retries checks
     PageAssertions --> Page : reads
     PageAssertions --> AutoWait : retries checks
+    Page --> StepRecorder : records navigation
+    Locator --> StepRecorder : records actions
+    BasePage --> StepRecorder : records page operations
+    LocatorAssertions --> StepRecorder : records assertions
+    PageAssertions --> StepRecorder : records assertions
 ```
 
 The pytest plugin is a module, not a class. It owns function-scoped browser/page
-fixtures and captures failure screenshots. pytest-xdist runs these fixtures in
-separate worker processes; GitHub Actions and Jenkins invoke pytest and collect
-JUnit, Allure, and screenshot artifacts. `DataReader` is independent of the
-browser and assertion classes.
+fixtures, activates a per-test step recorder, and captures failure screenshots.
+pytest-xdist runs these fixtures in separate worker processes while sharing one
+isolated report directory per invocation, then copies the completed report to
+`latest/`. GitHub Actions and Jenkins invoke
+pytest and collect JUnit, Allure, step, and screenshot artifacts. `DataReader`
+is independent of the browser and assertion classes.

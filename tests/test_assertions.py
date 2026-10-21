@@ -127,9 +127,24 @@ def test_assertion_failure_preserves_scope_and_last_value(fast_assertion_setting
         expect(locator, timeout=0).not_.to_be_enabled()
     message = str(caught.value)
     assert "#parent" in message and ".child" in message and "index=1" in message
-    assert "Last state: enabled=True" in message
+    assert "Last state: enabled" in message
     assert driver.find_elements.call_count == 1
     assert parent.find_elements.call_count == 1
+
+
+def test_missing_enabled_message_explains_failure_without_boolean_syntax(fast_assertion_settings):
+    driver = Mock()
+    driver.find_elements.return_value = []
+
+    with pytest.raises(AssertionError) as caught:
+        expect(Locator("#missing", driver=driver), timeout=0).to_be_enabled()
+
+    message = str(caught.value)
+    assert "Expected Locator(selector='#missing') to be enabled" in message
+    assert "Last state: element not found (NoSuchElementException)" in message
+    assert "Timeout: 0 seconds" in message
+    assert "=True" not in message
+    assert caught.value.__cause__ is None
 
 
 @pytest.mark.parametrize("target_type", ["locator", "page"])

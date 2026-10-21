@@ -124,6 +124,24 @@ from pages.login_page import LoginPage
 login = LoginPage(page).open().wait_until_loaded(timeout=5)
 ```
 
+Mark reusable page-object operations once, rather than adding report code to
+every test:
+
+```python
+from pylenium import step
+
+@step("Submit login form")
+def login(self, email: str, password: str) -> None:
+    self._email.fill(email)
+    self._password.fill(password)
+    self._submit.click()
+```
+
+No Allure import is needed in the page object. `open()`, `wait_until_loaded()`,
+locator actions, and `expect()` assertions also produce steps. Internal readiness
+polls do not. The decorator does not include method arguments such as passwords
+in step names.
+
 `DataReader.read_json(path)` and `DataReader.read_csv(path)` load UTF-8 test data. For
 example, `DataReader.read_json("data/invalid_login_cases.json")` reads the cases used by the
 repository tests. CSV input needs a header row and returns dictionaries of strings.
@@ -158,7 +176,7 @@ The `browser` tests visit a public website and fail if that site or the network 
 unavailable. `-n 2` uses two pytest-xdist workers and separate browser sessions.
 
 The plugin accepts `--browser`, `--headless` or `--headed`, `--base-url`,
-`--screenshots-dir`, `--page-load-timeout`, `--action-timeout`, and
+`--reports-root`, `--screenshots-dir`, `--page-load-timeout`, `--action-timeout`, and
 `--assertion-timeout`. The two display flags cannot be combined. Timeouts are
 finite, non-negative seconds; zero makes action and assertion checks immediate.
 The repository's `practice_page` fixture in [tests/conftest.py](tests/conftest.py) opens Automation
@@ -212,16 +230,28 @@ and reporter registries are not currently provided.
 
 ## Results and CI
 
-On a failed test with a live browser, the pytest plugin saves a screenshot in
-`artifacts/screenshots` and attaches it to Allure when the Allure pytest plugin is
-installed. Screenshot errors do not replace the test failure. pytest can also produce JUnit
-and Allure results:
+Each pytest invocation writes into its own `artifacts/runs/<run-id>/` directory.
+After it finishes, the plugin copies that run into `artifacts/latest/` for easy
+access; starting another run does not delete an active run's evidence. The report
+contains `junit.xml`, neutral step records in `steps/`, and `allure-results/`
+when Allure pytest is installed. Failure screenshots go to `screenshots/` and
+are attached to Allure. Screenshot failures do not replace the test failure.
+For a quick local demonstration in PowerShell or Command Prompt:
 
-```bash
-poetry run pytest --headless --junitxml=artifacts/junit.xml --alluredir=artifacts/allure-results
+```powershell
+poetry run pytest tests\test_browser_integration.py::test_login_form_locators_and_assertions tests\test_browser_integration.py::test_page_object_opens_login_form tests\test_browser_integration.py::test_login_rejects_unknown_account --browser chrome --headed
+allure serve artifacts/latest/allure-results
 ```
 
-Allure output is raw result data; viewing it requires the Allure command-line tool.
+To inspect a failure, temporarily change the login email selector in
+`test_login_form_locators_and_assertions` to a missing selector, rerun the pytest
+command, and open Allure again. Restore the selector afterward.
+
+Allure output is raw result data. With the separate Allure command-line tool,
+run `allure serve artifacts/latest/allure-results` to view it. Explicit
+`--junitxml`, `--alluredir`, and `--screenshots-dir` paths still override the
+automatic locations. A JUnit testcase includes a plain-text step summary;
+Allure displays the nested steps and failure screenshot.
 
 [GitHub Actions](.github/workflows/verify.yml) runs unit tests and Chrome, Firefox,
 and Edge browser tests on pushes and pull requests. Manual runs can choose the browser,

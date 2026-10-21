@@ -100,8 +100,7 @@ jobs:
                   --action-timeout="$CI_ACTION_TIMEOUT"
                   --assertion-timeout="$CI_ASSERTION_TIMEOUT"
                   --maxfail="$CI_MAX_FAILURES"
-                  --junitxml="artifacts/junit-$browser.xml"
-                  --alluredir="artifacts/allure-results-$browser")
+                  --reports-root="artifacts/$browser")
             echo "::group::${CI_SUITE}: ${browser}"
             if [ "$CI_HEADLESS" = true ]; then
               poetry run pytest "${args[@]}" --headless || browser_result=$?
@@ -112,7 +111,7 @@ jobs:
             fi
             echo "::endgroup::"
             if [ "$browser_result" -ne 0 ]; then
-              diagnostic=$(python -c 'import sys, xml.etree.ElementTree as ET; root = ET.parse(sys.argv[1]).getroot(); issue = next((item for item in root.iter() if item.tag in ("error", "failure")), None); message = issue.get("message", "") if issue is not None else "pytest failed"; print((message.splitlines() or ["pytest failed"])[0])' "artifacts/junit-$browser.xml") || diagnostic="JUnit result unavailable"
+              diagnostic=$(python -c 'import sys, xml.etree.ElementTree as ET; root = ET.parse(sys.argv[1]).getroot(); issue = next((item for item in root.iter() if item.tag in ("error", "failure")), None); message = issue.get("message", "") if issue is not None else "pytest failed"; print((message.splitlines() or ["pytest failed"])[0])' "artifacts/$browser/latest/junit.xml") || diagnostic="JUnit result unavailable"
               echo "::error title=${CI_SUITE} ${browser} failed::${diagnostic}"
               result=1
             fi

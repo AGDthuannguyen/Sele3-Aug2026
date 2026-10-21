@@ -19,10 +19,13 @@ LOGIN_RESPONSE_TIMEOUT = 60
 
 def test_login_form_locators_and_assertions(practice_page):
     LoginPage(practice_page).wait_until_loaded(timeout=5)
-    assert practice_page.get_by_text("Login to your account").is_visible()
+    expect(practice_page.get_by_text("Login to your account")).to_be_visible()
+
     email = practice_page.locator("[data-qa='login-email']")
     expect(email).to_be_visible()
+
     expect(email).to_be_enabled()
+
     expect(email).to_have_attribute("type", "email")
     expect(practice_page).to_have_url("/login")
     expect(practice_page).not_.to_have_title("Wrong Title")
@@ -31,8 +34,7 @@ def test_login_form_locators_and_assertions(practice_page):
 
 def test_page_object_opens_login_form(practice_page):
     practice_page.goto("/")
-    login = LoginPage(practice_page).open().wait_until_loaded(timeout=5)
-    assert login.is_loaded()
+    LoginPage(practice_page).open().wait_until_loaded(timeout=5)
     expect(practice_page).to_have_url("/login")
 
 
